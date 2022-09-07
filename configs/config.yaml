@@ -1,0 +1,26 @@
+gpu:
+  memory_limit:
+
+preprocessing:
+  clip_value_min: -100
+  clip_value_max: 200
+
+data:
+  patch_size: [64, 64, 64]
+  augmentation:
+    rotation: False
+    random_center: True
+
+model:
+  model_name: "Unet"
+  output_channels: 3
+  last_activation: "softmax"
+  n_features: [12, 24, 48, 96, 192]
+  compile:
+    optimizer: "adam"
+    learning_rate: 1e-3
+    loss: "dsc"
+
+training:
+  epochs: 200
+  batch_size: 4

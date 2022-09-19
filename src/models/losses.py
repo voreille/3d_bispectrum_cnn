@@ -36,14 +36,11 @@ def dice_coefficient_hard(y_true,
                             spatial_axis=spatial_axis)
 
 
-def dice_loss(
-        y_true,
-        y_pred,
-        loss_type='jaccard',
-        smooth=1e-6,
-        spatial_axis=(1, 2, 3),
-        reduction=None,
-):
+def dice_loss(y_true,
+              y_pred,
+              loss_type='jaccard',
+              smooth=1e-6,
+              spatial_axis=(1, 2, 3)):
     l = 1 - dice_coefficient(
         y_true,
         y_pred,
@@ -52,27 +49,21 @@ def dice_loss(
         spatial_axis=spatial_axis,
     )
 
-    if reduction == "mean":
-        return tf.reduce_mean(l)
-
     return l
 
 
 def dice_coefficient(y_true,
                      y_pred,
-                     loss_type='jaccard',
+                     loss_type='sorensen',
                      smooth=1e-6,
                      spatial_axis=(1, 2, 3)):
     intersection = tf.reduce_sum(y_true * y_pred, axis=spatial_axis)
     if loss_type == 'jaccard':
-        union = tf.reduce_sum(
-            tf.square(y_pred),
-            axis=spatial_axis,
-        ) + tf.reduce_sum(tf.square(y_true), axis=spatial_axis)
+        union = tf.reduce_sum(y_pred**2, axis=spatial_axis) + tf.reduce_sum(
+            y_true**2, axis=spatial_axis)
 
     elif loss_type == 'sorensen':
-        union = tf.reduce_sum(y_pred, axis=spatial_axis) + tf.reduce_sum(
-            y_true, axis=spatial_axis)
+        union = tf.reduce_sum(y_pred + y_true, axis=spatial_axis)
 
     else:
         raise ValueError("Unknown `loss_type`: %s" % loss_type)

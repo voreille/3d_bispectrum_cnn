@@ -9,7 +9,8 @@ import SimpleITK as sitk
 from sklearn.model_selection import RepeatedStratifiedKFold
 
 project_dir = Path(__file__).resolve().parents[2]
-path_data = project_dir / f"data/processed/Task08_HepaticVessel_training.hdf5"
+task = "Task04_Hippocampus"
+path_data = project_dir / f"data/processed/{task}/{task}_training.hdf5"
 
 n_rep = 10
 
@@ -33,7 +34,7 @@ def main():
 
     with open(
             project_dir /
-            "data/processed/Task08_HepaticVessel_training_split.json",
+            f"data/processed/{task}/{task}_training_split.json",
             'w') as f:
         json.dump(id_dicts, f)
 

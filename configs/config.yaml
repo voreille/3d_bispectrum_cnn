@@ -12,13 +12,17 @@ data:
     random_center: True
 
 model:
-  model_name: "Unet"
+  model_name: "BLRIUnet"
   output_channels: 3
   last_activation: "softmax"
   n_features: [12, 24, 48, 96, 192]
   compile:
     optimizer: "adam"
     learning_rate: 1e-3
+    # lr_scheduler:
+    #   initial_learning_rate: 0.01
+    #   decay_steps: 10000
+    #   decay_rate: 0.9
     loss: "dsc"
 
 training:

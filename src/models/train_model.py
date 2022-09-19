@@ -47,10 +47,10 @@ def main(config, gpu_id, split_id, output_path):
     file = h5py.File(os.environ["DATAPATH"], 'r')
     ids_train = get_split(split_id, os.environ["SPLITPATH"])["training"]
     ids_val = get_split(split_id, os.environ["SPLITPATH"])["validation"]
-    tf_data_creator = TFDataCreator(
+    tf_data_creator = TFDataCreator.get("Task04")(
         file,
         image_ids=ids_train,
-        patch_size=config["data"]["patch_size"],
+        # patch_size=config["data"]["patch_size"],
         clip_value_min=config["preprocessing"]["clip_value_min"],
         clip_value_max=config["preprocessing"]["clip_value_max"],
         num_parallel_calls=tf.data.AUTOTUNE,
@@ -58,7 +58,7 @@ def main(config, gpu_id, split_id, output_path):
     )
     ds_train = tf_data_creator.get_tf_data(
         ids_train,
-        data_augmentation=True,
+        data_augmentation=False,
     ).batch(config["training"]["batch_size"])
 
     ds_val = tf_data_creator.get_tf_data(
@@ -66,21 +66,23 @@ def main(config, gpu_id, split_id, output_path):
         data_augmentation=False,
     ).batch(4)
 
-    callbacks = [
-        EarlyStopping(
-            minimal_num_of_epochs=10,
-            monitor='val_loss',
-            patience=10,
-            verbose=0,
-            mode='max',
-            restore_best_weights=True,
-        )
-    ]
+    # callbacks = [
+    #     EarlyStopping(
+    #         minimal_num_of_epochs=10,
+    #         monitor='val_loss',
+    #         patience=10,
+    #         verbose=0,
+    #         mode='min',
+    #         restore_best_weights=True,
+    #     )
+    # ]
     model = get_compiled_model(config["model"], run_eagerly=run_eagerly)
-    model.fit(x=ds_train,
-              validation_data=ds_val,
-              epochs=config["training"]["epochs"],
-              callbacks=callbacks)
+    model.fit(
+        x=ds_train,
+        validation_data=ds_val,
+        epochs=config["training"]["epochs"],
+    )
+    #   callbacks=callbacks)
 
     file.close()
 

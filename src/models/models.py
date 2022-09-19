@@ -31,40 +31,62 @@ def get_compiled_model(params, run_eagerly=False):
     }
     if model_name == "Unet":
         model = Unet(**model_params)
-    elif model_name == "BSHConv3D":
-        model = BSHConv3D(**model_params["model"])
+    elif model_name == "BLRIUnet":
+        model = BLRIUnet(**model_params["model"])
     else:
         raise ValueError(f"Model {model_name} not implemented")
 
-    return compile_model(model, params["compile"], run_eagerly=run_eagerly)
+    return compile_model(model,
+                         params["compile"],
+                         output_channels=params["output_channels"],
+                         run_eagerly=run_eagerly)
 
 
-def dice_vessel(y_true, y_pred):
+def dice_0(y_true, y_pred):
+    return dice_coefficient_hard(y_true[..., 0], y_pred[..., 0])
+
+
+def dice_1(y_true, y_pred):
     return dice_coefficient_hard(y_true[..., 1], y_pred[..., 1])
 
 
-def dice_tumor(y_true, y_pred):
+def dice_2(y_true, y_pred):
     return dice_coefficient_hard(y_true[..., 2], y_pred[..., 2])
 
 
-def compile_model(model, params, run_eagerly=False):
+def crossentropy(y_true, y_pred):
+    l = tf.keras.losses.categorical_crossentropy(y_true, y_pred)
+    return tf.reduce_mean(l, axis=(1, 2, 3))
+
+
+def compile_model(model, params, output_channels=3, run_eagerly=False):
     if params["optimizer"] == "adam":
-        optimizer = tf.keras.optimizers.Adam(learning_rate=float(
-            params["learning_rate"]), )
+        # lr = tf.keras.optimizers.schedules.ExponentialDecay(
+        #     **params["lr_scheduler"], )
+        optimizer = tf.keras.optimizers.Adam(params["learning_rate"])
     else:
         raise ValueError(f"Optimizer {params['optimizer']} not implemented")
 
     if params["loss"] == "dsc":
-        loss = lambda y_true, y_pred: dice_loss(y_true[..., 0], y_pred[
-            ..., 0]) + dice_loss(y_true[..., 1], y_pred[..., 1]) + dice_loss(
-                y_true[..., 2], y_pred[..., 2])
+        loss = lambda y_true, y_pred: tf.reduce_mean(
+            dice_loss(
+                y_true[..., 1],
+                y_pred[..., 1],
+            ) + dice_loss(
+                y_true[..., 2],
+                y_pred[..., 2],
+            ) + crossentropy(
+                y_true,
+                y_pred,
+            ))
+        # loss = tf.keras.losses.CategoricalCrossentropy()
     else:
         raise ValueError(f"Loss {params['loss']} not implemented")
 
     model.compile(
         optimizer=optimizer,
         loss=loss,
-        metrics=[dice_vessel, dice_tumor],
+        metrics=[dice_0, dice_1, dice_2],
         run_eagerly=run_eagerly,
     )
 

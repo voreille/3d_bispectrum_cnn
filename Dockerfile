@@ -1,5 +1,4 @@
-# FROM tensorflow/tensorflow:latest-gpu
-FROM tensorflow/tensorflow:2.10.0rc1-gpu-jupyter
+FROM tensorflow/tensorflow:2.9.2-gpu-jupyter
 
 ARG USERNAME=vscode
 ARG USER_UID=1000

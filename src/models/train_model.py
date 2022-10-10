@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import datetime
+import logging
 
 import click
 import yaml
@@ -13,6 +14,10 @@ from src.data.tf_data import TFDataCreator
 from src.models.utils import config_gpu
 from src.data.utils import get_split
 from src.models.callbacks import EarlyStopping
+
+log_fmt = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+logging.basicConfig(level=logging.INFO, format=log_fmt)
+logger = logging.getLogger(__name__)
 
 project_dir = Path(__file__).resolve().parents[2]
 
@@ -32,6 +37,10 @@ else:
               default=config_path,
               help="config file")
 @click.option("--gpu-id", type=click.STRING, default="1", help="gpu id")
+@click.option("--memory-limit",
+              type=click.FLOAT,
+              default=16,
+              help="GPU memory limit in GB")
 @click.option("--split-id", type=click.INT, default=0, help="split id")
 @click.option(
     "--output-path",
@@ -39,11 +48,16 @@ else:
     default="models",
     help="split id",
 )
-def main(config, gpu_id, split_id, output_path):
+def main(config, gpu_id, memory_limit, split_id, output_path):
     with open(config) as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
-    config_gpu(gpu_id, config["gpu"]["memory_limit"])
+    config_gpu(gpu_id, memory_limit=memory_limit)
+
+    if config["model"]["mixed_precision"]:
+        logger.info("Using mixed precision")
+        tf.keras.mixed_precision.set_global_policy('mixed_float16')
+
     file = h5py.File(os.environ["DATAPATH"], 'r')
     ids_train = get_split(split_id, os.environ["SPLITPATH"])["training"]
     ids_val = get_split(split_id, os.environ["SPLITPATH"])["validation"]

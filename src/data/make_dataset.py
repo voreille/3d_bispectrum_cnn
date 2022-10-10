@@ -34,6 +34,7 @@ def main():
         label_sitk = sitk.ReadImage(str(label_path))
 
         if image_sitk.GetSpacing() != resampling:
+            print(f"Resampling image {image_id}")
             image_sitk, label_sitk = resample(image_sitk, label_sitk)
 
         image = np.transpose(sitk.GetArrayFromImage(image_sitk), (2, 1, 0))

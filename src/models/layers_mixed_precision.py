@@ -1,7 +1,5 @@
 import math
-from itertools import product
 from typing import Callable
-import warnings
 
 import tensorflow as tf
 import numpy as np
@@ -10,31 +8,13 @@ from sympy.physics.quantum.cg import CG
 from sympy import Ynm, Symbol, lambdify
 
 
-def get_lri_conv2d(*args, kind="bispectrum", **kwargs):
+def get_lri_conv3d(*args, kind="bispectrum", **kwargs):
     if kind == "bispectrum":
         return BSHConv3D(*args, **kwargs)
+    elif kind == "spectrum":
+        return SSHConv3D(*args, **kwargs)
     else:
         raise ValueError(f"The kind {kind} is not supported")
-
-
-class SEBlock(tf.keras.layers.Layer):
-
-    def __init__(self, ratio=16, **kwargs):
-        super().__init__(**kwargs)
-        self.ratio = ratio
-        self.gap = tf.keras.layers.GlobalAveragePooling2D()
-
-    def build(self, input_shape):
-        self.fc_1 = tf.keras.layers.Dense(input_shape[-1] // self.ratio,
-                                          activation="relu")
-        self.fc_2 = tf.keras.layers.Dense(input_shape[-1],
-                                          activation="sigmoid")
-
-    def call(self, inputs):
-        x = self.gap(inputs)
-        x = self.fc_1(x)
-        x = self.fc_2(x)
-        return tf.multiply(inputs, x)
 
 
 class BSHConv3D(tf.keras.layers.Layer):
@@ -85,7 +65,7 @@ class BSHConv3D(tf.keras.layers.Layer):
             self.bias = None
 
         if project:
-            self.proj_conv = tf.keras.layers.Conv2D(
+            self.proj_conv = tf.keras.layers.Conv3D(
                 streams,
                 1,
                 kernel_initializer=proj_initializer,
@@ -175,8 +155,8 @@ class BSHConv3D(tf.keras.layers.Layer):
         ])
 
     def call(self, inputs):
-        x = self.conv_sh(inputs)
-        x = self.get_bisp_feature_maps(x)
+        real_x, imag_x = self.conv_sh(inputs)
+        x = self.get_bisp_feature_maps(tf.complex(real_x, imag_x))
         x = tf.math.sign(x) * tf.math.log(1 + tf.math.abs(x))
         if self.bias is not None:
             x = x + self.bias
@@ -244,14 +224,18 @@ class SSHConv3D(BSHConv3D):
     def _get_fn(self, x, n):
         return x[..., n * n:n * n + 2 * n + 1]
 
-    def _get_spectrum_feature_maps(self, sh_feature_maps):
+    def _get_spectrum_feature_maps(
+        self,
+        real_sh_feature_maps,
+        imag_sh_feature_maps,
+    ):
         batch_size, depth, height, width, n_streams, n_harmonics = tf.shape(
-            sh_feature_maps)
+            real_sh_feature_maps)
         spect_feature_maps = []
         for n in range(self.max_degree + 1):
-            spect_feature_maps.append(
-                1 / (2 * n + 1) *
-                tf.reduce_sum(np.abs(self._get_fn(sh_feature_maps, n))**2, -1))
+            spect_feature_maps.append(1 / (2 * n + 1) * tf.reduce_sum(
+                self._get_fn(real_sh_feature_maps, n)**2 +
+                self._get_fn(imag_sh_feature_maps, n)**2, -1))
         spect_feature_maps = tf.stack(spect_feature_maps, -1)
         return tf.reshape(spect_feature_maps, [
             batch_size,
@@ -262,10 +246,224 @@ class SSHConv3D(BSHConv3D):
         ])
 
     def call(self, inputs):
-        x = self.conv_sh(inputs)
-        x = self._get_spectrum_feature_maps(x)
+        real_x, imag_x = self.conv_sh(inputs)
+        x = self._get_spectrum_feature_maps(real_x, imag_x)
         x = tf.math.sign(x) * tf.math.log(1 + tf.math.abs(x))
+        if self.proj_conv:
+            x = self.proj_conv(x)
         return x
+
+
+class SHConv3DBis(tf.keras.layers.Layer):
+    _registry = {}  # class var that store the different daughter
+
+    def __init_subclass__(cls, name, **kwargs):
+        cls.name = name
+        SHConv3D._registry[name] = cls
+        super().__init_subclass__(**kwargs)
+
+    @classmethod
+    def get(cls, name: str):
+        return SHConv3D._registry[name]
+
+    def __init__(self,
+                 streams,
+                 kernel_size,
+                 max_degree=3,
+                 strides=1,
+                 padding='valid',
+                 initializer="random_normal",
+                 is_transpose=False,
+                 **kwargs):
+        super().__init__(**kwargs)
+        self.streams = streams
+        self.max_degree = max_degree
+        self.n_harmonics = (max_degree + 1)**2
+        self.kernel_size = kernel_size
+        self.strides = strides if type(strides) is not int else 5 * (strides, )
+        self.padding = padding.upper()
+        self.initializer = initializer
+        self.sh_indices = list(self._sh_indices())
+        if is_transpose:
+            self.convolution = conv3d_transpose_complex
+        else:
+            self.convolution = conv3d_complex
+        self.atoms = self._atoms()
+
+    def call(self, inputs, training=None):
+        filters = self.filters
+        channels = tf.shape(filters)[3]
+        filters = tf.reshape(filters, (
+            self.kernel_size,
+            self.kernel_size,
+            self.kernel_size,
+            channels,
+            self.streams * self.n_harmonics,
+        ))
+
+        real_filters = tf.cast(tf.math.real(filters), inputs.dtype)
+        imag_filters = tf.cast(tf.math.imag(filters), inputs.dtype)
+
+        real_feature_maps = tf.nn.conv3d(
+            inputs,
+            real_filters,
+            self.strides,
+            self.padding,
+        )
+        imag_feature_maps = tf.nn.conv3d(
+            inputs,
+            imag_filters,
+            self.strides,
+            self.padding,
+        )
+
+        # tf is too dumb for tf.shape(...)[:3]
+        batch_size = tf.shape(real_feature_maps)[0]
+        depth = tf.shape(real_feature_maps)[1]
+        height = tf.shape(real_feature_maps)[2]
+        width = tf.shape(real_feature_maps)[3]
+
+        real_feature_maps = tf.reshape(real_feature_maps, (
+            batch_size,
+            depth,
+            height,
+            width,
+            self.streams,
+            self.n_harmonics,
+        ))
+        imag_feature_maps = tf.reshape(imag_feature_maps, (
+            batch_size,
+            depth,
+            height,
+            width,
+            self.streams,
+            self.n_harmonics,
+        ))
+
+        return real_feature_maps, imag_feature_maps
+
+    def _atoms(self):
+        raise NotImplementedError("It is an abstrac class")
+
+    def _get_spherical_coordinates(self):
+        x_grid = np.linspace(-(self.kernel_size // 2), self.kernel_size // 2,
+                             self.kernel_size)
+        x, y, z = np.meshgrid(x_grid, x_grid, x_grid, indexing='xy')
+        r = np.sqrt(x**2 + y**2 + z**2)
+        phi = np.arctan2(y, x)
+        theta = np.arccos(np.divide(z, r, out=np.zeros_like(r), where=r != 0))
+        return r, theta, phi
+
+    def _compute_spherical_harmonics(self, theta, phi):
+        sh = np.zeros((self.kernel_size, self.kernel_size, self.kernel_size,
+                       self.n_harmonics),
+                      dtype=np.complex64)
+        for n in range(self.max_degree + 1):
+            for m in range(-n, n + 1):
+                sh[..., self.ravel_sh_index(n, m)] = spherical_harmonics(
+                    m, n, theta, phi)
+        return sh
+
+    def ravel_sh_index(self, n, m):
+        if np.abs(m) > n:
+            raise ValueError("m must be in [-n, n]")
+        return n**2 + m + n
+
+    def _sh_indices(self):
+        for n in range(self.max_degree + 1):
+            for m in range(-n, n + 1):
+                yield (n, m)
+
+    def unravel_sh_index(self, index):
+        return self.sh_indices[index]
+
+
+class SHConv3DBisRadial(SHConv3DBis, name="radial"):
+
+    def __init__(self,
+                 streams,
+                 kernel_size,
+                 max_degree=3,
+                 strides=1,
+                 padding='valid',
+                 initializer="glorot_adapted",
+                 is_transpose=False,
+                 radial_function=None,
+                 **kwargs):
+
+        self.radial_function = SHConv3DRadial._get_radial_function(
+            radial_function)
+        # number of radial profiles used to build the filters, w/o the central one
+        self.n_radial_profiles = kernel_size // 2
+        # number of atoms used to build the filters, w/o the central one
+        self.n_atoms = (max_degree + 1)**2 * self.n_radial_profiles
+        super().__init__(
+            streams,
+            kernel_size,
+            max_degree=max_degree,
+            strides=strides,
+            padding=padding,
+            initializer=initializer,
+            is_transpose=is_transpose,
+            **kwargs,
+        )
+
+    @staticmethod
+    def _get_radial_function(input):
+        if input is None:
+            return lambda r, i: tri(r - i)
+        if input == "triangle":
+            return lambda r, i: tri(r - i)
+        if input == "gaussian":
+            return lambda r, i: np.exp(-0.5 * ((i - r) / 0.5)**2)
+        if isinstance(input, Callable):
+            return input
+
+        raise ValueError("Unknown radial function")
+
+    # def ravel_index(self, i, n, m):
+    #     return i * self.n_harmonics + self.ravel_sh_index(n, m)
+
+    # def unravel_index(self, index):
+    #     i = index // self.n_harmonics
+    #     index -= i * self.n_harmonics
+    #     n, m = self.unravel_sh_index(index)
+    #     return i, n, m
+
+    def _atoms(self):
+        r, theta, phi = self._get_spherical_coordinates()
+        kernel_profiles = self._compute_kernel_profiles(r)
+        spherical_harmonics = self._compute_spherical_harmonics(theta, phi)
+
+        atoms0 = np.zeros(
+            (self.kernel_size, self.kernel_size, self.kernel_size, 1, 1, 1),
+            dtype=np.csingle)
+        atoms0[:, :, :, 0, 0, 0] = kernel_profiles[..., 0]
+        kernel_profiles = kernel_profiles[:, :, :, np.newaxis, np.newaxis,
+                                          np.newaxis, 1:]
+        spherical_harmonics = spherical_harmonics[:, :, :, np.newaxis,
+                                                  np.newaxis, :, np.newaxis]
+        atoms = kernel_profiles * spherical_harmonics
+
+        # norm = np.sqrt(np.sum(np.conj(atoms) * atoms, axis=(0, 1, 2)))
+        # norm[norm == 0] = 1
+        # atoms = atoms / norm
+
+        # norm = np.sqrt(np.sum(np.conj(atoms0) * atoms0, axis=(0, 1, 2)))
+        # norm[norm == 0] = 1
+        # atoms0 = atoms0 / norm
+
+        return (tf.constant(atoms0, dtype=tf.complex64),
+                tf.constant(atoms, dtype=tf.complex64))
+
+    def _compute_kernel_profiles(self, radius):
+        n_profiles = self.kernel_size // 2 + 1
+        kernel_profiles = np.zeros(
+            (self.kernel_size, self.kernel_size, self.kernel_size, n_profiles),
+            dtype=np.float32)
+        for i in range(n_profiles):
+            kernel_profiles[:, :, :, i] = self.radial_function(radius, i)
+        return kernel_profiles
 
 
 class SHConv3D(tf.keras.layers.Layer):
@@ -294,7 +492,7 @@ class SHConv3D(tf.keras.layers.Layer):
         self.max_degree = max_degree
         self.n_harmonics = (max_degree + 1)**2
         self.kernel_size = kernel_size
-        self.strides = strides
+        self.strides = strides if type(strides) is not int else 5 * (strides, )
         self.padding = padding.upper()
         self.initializer = initializer
         self.sh_indices = list(self._sh_indices())
@@ -314,18 +512,30 @@ class SHConv3D(tf.keras.layers.Layer):
             channels,
             self.streams * self.n_harmonics,
         ))
-        feature_maps = self.convolution(inputs,
-                                        filters,
-                                        self.strides,
-                                        padding=self.padding)
+
+        real_filters = tf.cast(tf.math.real(filters), inputs.dtype)
+        imag_filters = tf.cast(tf.math.imag(filters), inputs.dtype)
+
+        real_feature_maps = tf.nn.conv3d(
+            inputs,
+            real_filters,
+            self.strides,
+            self.padding,
+        )
+        imag_feature_maps = tf.nn.conv3d(
+            inputs,
+            imag_filters,
+            self.strides,
+            self.padding,
+        )
 
         # tf is too dumb for tf.shape(...)[:3]
-        batch_size = tf.shape(feature_maps)[0]
-        depth = tf.shape(feature_maps)[1]
-        height = tf.shape(feature_maps)[2]
-        width = tf.shape(feature_maps)[3]
+        batch_size = tf.shape(real_feature_maps)[0]
+        depth = tf.shape(real_feature_maps)[1]
+        height = tf.shape(real_feature_maps)[2]
+        width = tf.shape(real_feature_maps)[3]
 
-        feature_maps = tf.reshape(feature_maps, (
+        real_feature_maps = tf.reshape(real_feature_maps, (
             batch_size,
             depth,
             height,
@@ -333,7 +543,16 @@ class SHConv3D(tf.keras.layers.Layer):
             self.streams,
             self.n_harmonics,
         ))
-        return feature_maps
+        imag_feature_maps = tf.reshape(imag_feature_maps, (
+            batch_size,
+            depth,
+            height,
+            width,
+            self.streams,
+            self.n_harmonics,
+        ))
+
+        return real_feature_maps, imag_feature_maps
 
     def _atoms(self):
         raise NotImplementedError("It is an abstrac class")
@@ -501,8 +720,14 @@ class SHConv3DRadial(SHConv3D, name="radial"):
     @property
     def filters(self):
         atoms0, atoms = self.atoms
-        w0 = tf.complex(self.w0, tf.zeros_like(self.w0))
-        w = tf.complex(self.w, tf.zeros_like(self.w))
+
+        # Maybe there is a better way to do this
+        w0 = tf.cast(self.w0, tf.float32)
+        w0 = tf.complex(w0, tf.zeros_like(w0))
+
+        w = tf.cast(self.w, tf.float32)
+        w = tf.complex(w, tf.zeros_like(w))
+
         factor = tf.concat(
             [
                 tf.ones((1, ), dtype=tf.complex64),
@@ -652,7 +877,6 @@ class MaskedConv3D(tf.keras.layers.Layer):
 
 # @tf.function
 def conv3d_complex(input, filters, strides, **kwargs):
-    out_channels = tf.shape(filters)[-1]
     filters_expanded = tf.concat(
         [
             tf.math.real(filters),
@@ -664,8 +888,7 @@ def conv3d_complex(input, filters, strides, **kwargs):
     if type(strides) is int:
         strides = 5 * (strides, )
 
-    output = tf.nn.conv3d(input, filters_expanded, strides, **kwargs)
-    return tf.complex(output[..., :out_channels], output[..., out_channels:])
+    return tf.nn.conv3d(input, filters_expanded, strides, **kwargs)
 
 
 # @tf.function

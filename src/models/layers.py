@@ -651,6 +651,18 @@ class MaskedConv3D(tf.keras.layers.Layer):
 
 
 # @tf.function
+def conv3d_complex_alternative(input, filters, strides, **kwargs):
+    real_filter = tf.math.real(filters)
+    imag_filter = tf.math.imag(filters)
+
+    if type(strides) is int:
+        strides = 5 * (strides, )
+
+    real_output = tf.nn.conv3d(input, real_filter, strides, **kwargs)
+    imag_output = tf.nn.conv3d(input, imag_filter, strides, **kwargs)
+    return tf.complex(real_output, imag_output)
+
+
 def conv3d_complex(input, filters, strides, **kwargs):
     out_channels = tf.shape(filters)[-1]
     filters_expanded = tf.concat(

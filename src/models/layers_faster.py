@@ -534,9 +534,9 @@ class SHConv3DRadial(SHConv3D, name="radial"):
         spherical_harmonics = spherical_harmonics[:, :, :, np.newaxis, :]
         atoms = kernel_profiles * spherical_harmonics
 
-        norm = np.sqrt(np.sum(np.conj(atoms) * atoms, axis=(0, 1, 2)))
-        norm[norm == 0] = 1
-        atoms = atoms / norm
+        # norm = np.sqrt(np.sum(np.conj(atoms) * atoms, axis=(0, 1, 2)))
+        # norm[norm == 0] = 1
+        # atoms = atoms / norm
 
         return tf.constant(atoms, dtype=tf.complex64)
 

@@ -3,7 +3,7 @@ import os
 import tensorflow as tf
 import numpy as np
 
-from src.models.layers_faster import SSHConv3D, SHConv3D
+from src.models.layers_faster_debug import SSHConv3D, SHConv3D
 from src.models.utils import config_gpu
 
 config_gpu(gpu_id="0", memory_limit=10)

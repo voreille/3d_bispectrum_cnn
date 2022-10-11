@@ -265,47 +265,19 @@ class Unet(UnetBase):
         ])
 
 
-class SLRIUnet(UnetBase):
-
-    def get_first_block(self, filters):
-        return tf.keras.Sequential([
-            SSHConv3D(filters, 7, padding='SAME', activation="relu"),
-            SSHConv3D(filters, 3, padding='SAME', activation="relu"),
-        ])
-
-    def get_residual_block(self, filters):
-        return tf.keras.Sequential([
-            SSHConv3D(filters, 3, padding='SAME', activation="relu"),
-            SSHConv3D(filters, 3, padding='SAME', activation="relu"),
-            SSHConv3D(filters, 3, padding='SAME', activation="relu"),
-        ])
-
-    def get_conv_block(self, filters):
-        return tf.keras.Sequential([
-            SSHConv3D(filters, 3, padding='SAME', activation="relu"),
-            SSHConv3D(filters, 3, padding='SAME', activation="relu"),
-        ])
-
-    def get_upsampling_block(self, filters):
-        return tf.keras.Sequential([
-            tf.keras.layers.UpSampling3D(),
-            # BSHConv3D(filters, 3, padding='SAME', activation="relu"),
-        ])
-
-
 # class SLRIUnet(UnetBase):
 
 #     def get_first_block(self, filters):
 #         return tf.keras.Sequential([
-#             ResidualSLRILayer3D(filters, 7, padding='SAME', activation="relu"),
-#             ResidualSLRILayer3D(filters, 3, padding='SAME', activation="relu"),
+#             SSHConv3D(filters, 7, padding='SAME', activation="relu"),
+#             SSHConv3D(filters, 3, padding='SAME', activation="relu"),
 #         ])
 
 #     def get_residual_block(self, filters):
 #         return tf.keras.Sequential([
-#             ResidualSLRILayer3D(filters, 3, padding='SAME', activation="relu"),
-#             ResidualSLRILayer3D(filters, 3, padding='SAME', activation="relu"),
-#             ResidualSLRILayer3D(filters, 3, padding='SAME', activation="relu"),
+#             SSHConv3D(filters, 3, padding='SAME', activation="relu"),
+#             SSHConv3D(filters, 3, padding='SAME', activation="relu"),
+#             SSHConv3D(filters, 3, padding='SAME', activation="relu"),
 #         ])
 
 #     def get_conv_block(self, filters):
@@ -319,6 +291,34 @@ class SLRIUnet(UnetBase):
 #             tf.keras.layers.UpSampling3D(),
 #             # BSHConv3D(filters, 3, padding='SAME', activation="relu"),
 #         ])
+
+
+class SLRIUnet(UnetBase):
+
+    def get_first_block(self, filters):
+        return tf.keras.Sequential([
+            ResidualSLRILayer3D(filters, 7, padding='SAME', activation="relu"),
+            ResidualSLRILayer3D(filters, 3, padding='SAME', activation="relu"),
+        ])
+
+    def get_residual_block(self, filters):
+        return tf.keras.Sequential([
+            ResidualSLRILayer3D(filters, 3, padding='SAME', activation="relu"),
+            ResidualSLRILayer3D(filters, 3, padding='SAME', activation="relu"),
+            ResidualSLRILayer3D(filters, 3, padding='SAME', activation="relu"),
+        ])
+
+    def get_conv_block(self, filters):
+        return tf.keras.Sequential([
+            SSHConv3D(filters, 3, padding='SAME', activation="relu"),
+            SSHConv3D(filters, 3, padding='SAME', activation="relu"),
+        ])
+
+    def get_upsampling_block(self, filters):
+        return tf.keras.Sequential([
+            tf.keras.layers.UpSampling3D(),
+            # BSHConv3D(filters, 3, padding='SAME', activation="relu"),
+        ])
 
 
 class BLRIUnet(UnetBase):

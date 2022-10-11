@@ -13,7 +13,6 @@ from src.models.models import get_compiled_model
 from src.data.tf_data import TFDataCreator
 from src.models.utils import config_gpu
 from src.data.utils import get_split
-from src.models.callbacks import EarlyStopping
 
 log_fmt = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logging.basicConfig(level=logging.INFO, format=log_fmt)
@@ -46,9 +45,15 @@ else:
     "--output-path",
     type=click.Path(exists=False),
     default="models",
-    help="split id",
+    help="Relative path to save the model",
 )
-def main(config, gpu_id, memory_limit, split_id, output_path):
+@click.option(
+    "--log-path",
+    type=click.Path(exists=False),
+    default="logs",
+    help="Relative path to save the logs",
+)
+def main(config, gpu_id, memory_limit, split_id, output_path, log_path):
     with open(config) as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
@@ -80,23 +85,22 @@ def main(config, gpu_id, memory_limit, split_id, output_path):
         data_augmentation=False,
     ).batch(4)
 
-    # callbacks = [
-    #     EarlyStopping(
-    #         minimal_num_of_epochs=10,
-    #         monitor='val_loss',
-    #         patience=10,
-    #         verbose=0,
-    #         mode='min',
-    #         restore_best_weights=True,
-    #     )
-    # ]
+    callbacks = list()
+    if not DEBUG:
+        log_dir = project_dir / (
+            log_path + "/fit/" +
+            datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+        log_dir.mkdir(parents=True, exist_ok=True)
+        callbacks.append(
+            tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1))
+
     model = get_compiled_model(config["model"], run_eagerly=run_eagerly)
     model.fit(
         x=ds_train,
         validation_data=ds_val,
         epochs=config["training"]["epochs"],
+        callbacks=callbacks,
     )
-    #   callbacks=callbacks)
 
     file.close()
 

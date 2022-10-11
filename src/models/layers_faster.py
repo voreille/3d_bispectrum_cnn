@@ -236,13 +236,14 @@ class SSHConv3D(tf.keras.layers.Layer):
         self._indices = None
         self._indices_inverse = None
         self.activation = tf.keras.activations.get(activation)
-        self.initializer = initializer
 
         self.conv_sh = SHConv3D.get(name=radial_profile_type)(
+            streams,
             kernel_size,
             max_degree=max_degree,
             strides=strides,
             padding=padding,
+            initializer=initializer,
             **kwargs)
 
         self.n_radial_profiles = self.conv_sh.n_radial_profiles
@@ -269,30 +270,6 @@ class SSHConv3D(tf.keras.layers.Layer):
             self.proj_conv = None
         logger.info(
             f"Initializing SSHConv3D layer with streams: {streams} - done")
-
-    def build(self, input_shape):
-        if self.initializer == "glorot_adapted":
-            limit = limit_glorot(input_shape[-1], self.streams)
-            initializer = tf.keras.initializers.RandomUniform(minval=-limit,
-                                                              maxval=limit),
-        else:
-            initializer = self.initializer
-
-        self.w = self.add_weight(
-            shape=(
-                1,  # batch size
-                1,  # depth
-                1,  # height
-                1,  # width
-                input_shape[-1],  # input channels
-                self.streams,  # output channels
-                self.n_radial_profiles,
-                self.max_degree + 1,
-            ),
-            initializer=initializer,
-            trainable=True,
-            name="w_profile",
-        )
 
     @property
     def indices(self):
@@ -337,15 +314,6 @@ class SSHConv3D(tf.keras.layers.Layer):
 
     def call(self, inputs):
         real_x, imag_x = self.conv_sh(inputs)
-        real_x = tf.expand_dims(real_x, 5)
-        imag_x = tf.expand_dims(imag_x, 5)
-        w = tf.repeat(
-            self.w,
-            [2 * k + 1 for k in range(self.max_degree + 1)],
-            axis=-1,
-        )
-        real_x = tf.reduce_sum(w * real_x, axis=(4, 6))
-        imag_x = tf.reduce_sum(w * imag_x, axis=(4, 6))
 
         x = self._get_spectrum_feature_maps(real_x, imag_x)
 
@@ -371,12 +339,15 @@ class SHConv3D(tf.keras.layers.Layer):
         return SHConv3D._registry[name]
 
     def __init__(self,
+                 streams,
                  kernel_size,
                  max_degree=3,
                  strides=1,
                  padding='valid',
+                 initializer="glorot_adapted",
                  **kwargs):
         super().__init__(**kwargs)
+        self.streams = streams
         self.max_degree = max_degree
         self.n_harmonics = (max_degree + 1)**2
         self.kernel_size = kernel_size
@@ -385,6 +356,46 @@ class SHConv3D(tf.keras.layers.Layer):
         self.sh_indices = list(self._sh_indices())
         self.atoms = self._atoms()
         self.n_radial_profiles = self.atoms.shape[-2]
+        self.initializer = initializer
+        if padding.lower() == "same":
+            self.conv_central_pixel = tf.keras.layers.Conv3D(streams,
+                                                             1,
+                                                             strides=strides,
+                                                             padding="SAME")
+        else:
+            self.conv_central_pixel = tf.keras.Sequential([
+                tf.keras.layers.Conv3D(streams,
+                                       1,
+                                       strides=strides,
+                                       padding="SAME"),
+                tf.keras.layers.Cropping3D(cropping=(kernel_size // 2,
+                                                     kernel_size // 2,
+                                                     kernel_size // 2)),
+            ])
+
+    def build(self, input_shape):
+        if self.initializer == "glorot_adapted":
+            limit = limit_glorot(input_shape[-1], self.streams)
+            initializer = tf.keras.initializers.RandomUniform(minval=-limit,
+                                                              maxval=limit),
+        else:
+            initializer = self.initializer
+
+        self.w = self.add_weight(
+            shape=(
+                1,  # batch size
+                1,  # depth
+                1,  # height
+                1,  # width
+                input_shape[-1],  # input channels
+                self.streams,  # output channels
+                self.n_radial_profiles,
+                self.max_degree + 1,
+            ),
+            initializer=initializer,
+            trainable=True,
+            name="w_profile",
+        )
 
     def call(self, inputs, training=None):
         filters = self.atoms
@@ -437,6 +448,7 @@ class SHConv3D(tf.keras.layers.Layer):
             height,
             width,
             channels,
+            1,
             self.n_radial_profiles,
             self.n_harmonics,
         ))
@@ -446,9 +458,25 @@ class SHConv3D(tf.keras.layers.Layer):
             height,
             width,
             channels,
+            1,
             self.n_radial_profiles,
             self.n_harmonics,
         ))
+        w = tf.repeat(
+            self.w,
+            [2 * k + 1 for k in range(self.max_degree + 1)],
+            axis=-1,
+        )
+        # real_feature_maps = tf.reduce_sum(w * real_feature_maps, axis=(4, 6)),
+        real_feature_maps = tf.unstack(
+            tf.reduce_sum(w * real_feature_maps, axis=(4, 6)),
+            axis=-1,
+        )
+        real_feature_maps[0] = real_feature_maps[0] + self.conv_central_pixel(
+            inputs)
+        real_feature_maps = tf.stack(real_feature_maps, axis=-1)
+
+        imag_feature_maps = tf.reduce_sum(w * imag_feature_maps, axis=(4, 6))
 
         return real_feature_maps, imag_feature_maps
 
@@ -491,6 +519,7 @@ class SHConv3D(tf.keras.layers.Layer):
 class SHConv3DRadial(SHConv3D, name="radial"):
 
     def __init__(self,
+                 streams,
                  kernel_size,
                  max_degree=3,
                  strides=1,
@@ -505,6 +534,7 @@ class SHConv3DRadial(SHConv3D, name="radial"):
         # number of atoms used to build the filters, w/o the central one
         self.n_atoms = (max_degree + 1)**2 * self.n_radial_profiles
         super().__init__(
+            streams,
             kernel_size,
             max_degree=max_degree,
             strides=strides,

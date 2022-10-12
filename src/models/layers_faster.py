@@ -716,6 +716,40 @@ class MaskedConv3D(tf.keras.layers.Layer):
             ) + self.bias)
 
 
+class LinearUpsampling3D(tf.keras.layers.Layer):
+
+    def __init__(self, size=(2, 2, 2), **kwargs):
+        super().__init__(**kwargs)
+        self.size = size
+        self.kernel = self._get_kernel(size)
+
+    @staticmethod
+    def _get_kernel(size):
+        k1 = tri(np.linspace(-1, 1, 2 * size[0] + 1))
+        k1 = k1[1:-1]
+        k2 = tri(np.linspace(-1, 1, 2 * size[1] + 1))
+        k2 = k2[1:-1]
+        k3 = tri(np.linspace(-1, 1, 2 * size[2] + 1))
+        k3 = k3[1:-1]
+        k = np.tensordot(k1, k2, axes=0)
+        k = np.tensordot(k, k3, axes=0)
+        k = np.reshape(k, k.shape + (
+            1,
+            1,
+        ))
+        return tf.constant(k, dtype=tf.float32)
+
+    def call(self, inputs, training=None):
+        xs = tf.unstack(inputs, axis=-1)
+        out = []
+        kernel = tf.cast(self.kernel, inputs.dtype)
+        for x in xs:
+            x = tf.expand_dims(x, axis=-1)
+            x = conv3d_transpose(x, kernel, self.size, padding="SAME")
+            out.append(x)
+        return tf.concat(out, axis=-1)
+
+
 # @tf.function
 def conv3d_complex(input, filters, strides, **kwargs):
     filters_expanded = tf.concat(

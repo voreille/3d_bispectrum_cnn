@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 import datetime
 import logging
+import pprint
 
 import click
 import yaml
@@ -23,11 +24,8 @@ project_dir = Path(__file__).resolve().parents[2]
 config_path = project_dir / "configs/config.yaml"
 
 DEBUG = False
-
-if DEBUG:
-    run_eagerly = True
-else:
-    run_eagerly = False
+run_eagerly = False
+pp = pprint.PrettyPrinter(depth=4)
 
 
 @click.command()
@@ -35,10 +33,10 @@ else:
               type=click.Path(exists=True),
               default=config_path,
               help="config file")
-@click.option("--gpu-id", type=click.STRING, default="1", help="gpu id")
+@click.option("--gpu-id", type=click.STRING, default="0", help="gpu id")
 @click.option("--memory-limit",
               type=click.FLOAT,
-              default=16,
+              default=40,
               help="GPU memory limit in GB")
 @click.option("--split-id", type=click.INT, default=0, help="split id")
 @click.option(
@@ -57,6 +55,9 @@ def main(config, gpu_id, memory_limit, split_id, output_path, log_path):
     with open(config) as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
+    print("Config:")
+    pp.pprint(config)
+
     config_gpu(gpu_id, memory_limit=memory_limit)
 
     if config["model"]["mixed_precision"]:
@@ -70,8 +71,6 @@ def main(config, gpu_id, memory_limit, split_id, output_path, log_path):
         file,
         image_ids=ids_train,
         # patch_size=config["data"]["patch_size"],
-        clip_value_min=config["preprocessing"]["clip_value_min"],
-        clip_value_max=config["preprocessing"]["clip_value_max"],
         num_parallel_calls=tf.data.AUTOTUNE,
         params_augmentation=config["data"]["augmentation"],
     )
@@ -83,13 +82,12 @@ def main(config, gpu_id, memory_limit, split_id, output_path, log_path):
     ds_val = tf_data_creator.get_tf_data(
         ids_val,
         data_augmentation=False,
-    ).batch(4)
+    ).batch(config["training"]["batch_size"])
 
     callbacks = list()
     if not DEBUG:
-        log_dir = project_dir / (
-            log_path + "/fit/" +
-            datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+        log_dir = project_dir / (log_path + "/fit/" +
+                                 get_model_name(config, split_id))
         log_dir.mkdir(parents=True, exist_ok=True)
         callbacks.append(
             tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1))
@@ -108,9 +106,16 @@ def main(config, gpu_id, memory_limit, split_id, output_path, log_path):
         save_stuff(config, model, split_id, output_path)
 
 
+def get_model_name(config, split_id):
+    nf = "".join([str(n) + "_" for n in config["model"]["n_features"]])
+    return (f"{config['model']['model_name']}__"
+            f"ks_{config['model']['kernel_size']}__"
+            f"nf_{nf}__split_{split_id}"
+            f"__{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}")
+
+
 def save_stuff(config, model, split_id, output_path):
-    output_name = (f"{config['model']['model_name']}__split_{split_id}"
-                   f"__{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}")
+    output_name = get_model_name(config, split_id)
     output_folder = Path(output_path) / output_name
     output_folder.mkdir(parents=True, exist_ok=True)
     dir_to_save_weights = output_folder / "weights" / f"split_{split_id}" / "final"

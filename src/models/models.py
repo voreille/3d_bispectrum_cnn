@@ -26,8 +26,8 @@ def get_compiled_model(params, run_eagerly=False):
     model_name = params["model_name"]
     model_params = {
         k: i
-        for k, i in params.items()
-        if k in ["output_channels", "n_features", "last_activation"]
+        for k, i in params.items() if k in
+        ["output_channels", "n_features", "last_activation", "kernel_size"]
     }
     if model_name == "Unet":
         model = Unet(**model_params)
@@ -141,8 +141,10 @@ class UnetBase(tf.keras.Model):
         output_channels=1,
         last_activation="sigmoid",
         n_features=None,
+        kernel_size=3,
     ):
         super().__init__()
+        self.kernel_size = kernel_size
         if n_features is None:
             n_features = [12, 24, 48, 96, 192]
         self.output_channels = output_channels
@@ -233,24 +235,36 @@ class Unet(UnetBase):
     def get_first_block(self, filters):
         return tf.keras.Sequential([
             ResidualLayer3D(filters, 7, padding='SAME', activation="relu"),
-            ResidualLayer3D(filters, 3, padding='SAME', activation="relu"),
+            ResidualLayer3D(filters,
+                            self.kernel_size,
+                            padding='SAME',
+                            activation="relu"),
         ])
 
     def get_residual_block(self, filters):
         return tf.keras.Sequential([
-            ResidualLayer3D(filters, 3, padding='SAME', activation="relu"),
-            ResidualLayer3D(filters, 3, padding='SAME', activation="relu"),
-            ResidualLayer3D(filters, 3, padding='SAME', activation="relu"),
+            ResidualLayer3D(filters,
+                            self.kernel_size,
+                            padding='SAME',
+                            activation="relu"),
+            ResidualLayer3D(filters,
+                            self.kernel_size,
+                            padding='SAME',
+                            activation="relu"),
+            ResidualLayer3D(filters,
+                            self.kernel_size,
+                            padding='SAME',
+                            activation="relu"),
         ])
 
     def get_conv_block(self, filters):
         return tf.keras.Sequential([
             tf.keras.layers.Conv3D(filters,
-                                   3,
+                                   self.kernel_size,
                                    padding='SAME',
                                    activation="relu"),
             tf.keras.layers.Conv3D(filters,
-                                   3,
+                                   self.kernel_size,
                                    padding='SAME',
                                    activation="relu"),
         ])
@@ -298,20 +312,20 @@ class SLRIUnet(UnetBase):
     def get_first_block(self, filters):
         return tf.keras.Sequential([
             ResidualSLRILayer3D(filters, 7, padding='SAME', activation="relu"),
-            ResidualSLRILayer3D(filters, 3, padding='SAME', activation="relu"),
+            ResidualSLRILayer3D(filters, self.kernel_size, padding='SAME', activation="relu"),
         ])
 
     def get_residual_block(self, filters):
         return tf.keras.Sequential([
-            ResidualSLRILayer3D(filters, 3, padding='SAME', activation="relu"),
-            ResidualSLRILayer3D(filters, 3, padding='SAME', activation="relu"),
-            ResidualSLRILayer3D(filters, 3, padding='SAME', activation="relu"),
+            ResidualSLRILayer3D(filters, self.kernel_size, padding='SAME', activation="relu"),
+            ResidualSLRILayer3D(filters, self.kernel_size, padding='SAME', activation="relu"),
+            ResidualSLRILayer3D(filters, self.kernel_size, padding='SAME', activation="relu"),
         ])
 
     def get_conv_block(self, filters):
         return tf.keras.Sequential([
-            SSHConv3D(filters, 3, padding='SAME', activation="relu"),
-            SSHConv3D(filters, 3, padding='SAME', activation="relu"),
+            SSHConv3D(filters, self.kernel_size, padding='SAME', activation="relu"),
+            SSHConv3D(filters, self.kernel_size, padding='SAME', activation="relu"),
         ])
 
     def get_upsampling_block(self, filters):
@@ -326,20 +340,20 @@ class BLRIUnet(UnetBase):
     def get_first_block(self, filters):
         return tf.keras.Sequential([
             ResidualBLRILayer3D(filters, 7, padding='SAME', activation="relu"),
-            ResidualBLRILayer3D(filters, 3, padding='SAME', activation="relu"),
+            ResidualBLRILayer3D(filters, self.kernel_size, padding='SAME', activation="relu"),
         ])
 
     def get_residual_block(self, filters):
         return tf.keras.Sequential([
-            ResidualBLRILayer3D(filters, 3, padding='SAME', activation="relu"),
-            ResidualBLRILayer3D(filters, 3, padding='SAME', activation="relu"),
-            ResidualBLRILayer3D(filters, 3, padding='SAME', activation="relu"),
+            ResidualBLRILayer3D(filters, self.kernel_size, padding='SAME', activation="relu"),
+            ResidualBLRILayer3D(filters, self.kernel_size, padding='SAME', activation="relu"),
+            ResidualBLRILayer3D(filters, self.kernel_size, padding='SAME', activation="relu"),
         ])
 
     def get_conv_block(self, filters):
         return tf.keras.Sequential([
-            BSHConv3D(filters, 3, padding='SAME', activation="relu"),
-            BSHConv3D(filters, 3, padding='SAME', activation="relu"),
+            BSHConv3D(filters, self.kernel_size, padding='SAME', activation="relu"),
+            BSHConv3D(filters, self.kernel_size, padding='SAME', activation="relu"),
         ])
 
     def get_upsampling_block(self, filters):

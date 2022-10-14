@@ -56,7 +56,7 @@ class BSHConv3D(tf.keras.layers.Layer):
             strides=strides,
             padding=padding,
             initializer=initializer,
-            is_transpose=is_transpose,
+            # is_transpose=is_transpose,
             **kwargs)
 
         if use_bias:
@@ -114,6 +114,51 @@ class BSHConv3D(tf.keras.layers.Layer):
             for k, (n1, n2, i) in enumerate(self.indices):
                 self._indices_inverse[(n1, n2, i)] = k
         return self._indices_inverse
+
+    def get_bisp_feature_maps_faster(self, sh_feature_maps):
+        batch_size, depth, height, width, n_streams, n_harmonics = sh_feature_maps.get_shape(
+        ).as_list()
+        sh_feature_maps = tf.reshape(sh_feature_maps, [-1, n_harmonics])
+
+        bispectrum_coeffs = []
+        for n1 in range(0, math.floor(self.max_degree / 2) + 1):
+            for n2 in range(n1, math.ceil(self.max_degree / 2) + 1):
+                kronecker_product = []
+                for m1 in degree_to_indices_range(n1):
+                    kronecker_product.append(
+                        tf.expand_dims(sh_feature_maps[..., m1], -1) *
+                        sh_feature_maps[..., degree_to_indices_slice(n2)])
+                kronecker_product = tf.concat(kronecker_product, axis=-1)
+                kronp_clebshgordan = tf.matmul(
+                    kronecker_product, self.clebschgordan_matrix[(n1, n2)])
+
+                for i in range(np.abs(n1 - n2), n1 + n2 + 1):
+                    n_p = i**2 - (n1 - n2)**2
+                    Fi = tf.math.conj(
+                        sh_feature_maps[..., degree_to_indices_slice(i)])
+
+                    if (n1 + n2 + i) % 2 == 0:
+                        bispectrum_coeffs.append(
+                            tf.math.real(
+                                tf.reduce_sum(
+                                    kronp_clebshgordan[:, n_p:n_p + 2 * i + 1]
+                                    * Fi, -1)))
+                    else:
+                        bispectrum_coeffs.append(
+                            tf.math.imag(
+                                tf.reduce_sum(
+                                    kronp_clebshgordan[:, n_p:n_p + 2 * i + 1]
+                                    * Fi, -1)))
+        bispectrum_coeffs = tf.stack(bispectrum_coeffs, -1)
+        return tf.reshape(bispectrum_coeffs, [
+            batch_size,
+            depth,
+            height,
+            width,
+            n_streams * self.output_bispectrum_channels,
+        ])
+
+
 
     # @tf.function
     def get_bisp_feature_maps(self, sh_feature_maps):
@@ -586,6 +631,73 @@ class SHConv3DRadial(SHConv3D, name="radial"):
             kernel_profiles[:, :, :, i] = self.radial_function(radius, r0)
         return kernel_profiles
 
+# class SHConv3DCrossed(SHConv3D, name="crossed"):
+
+#     def __init__(self,
+#                  streams,
+#                  kernel_size,
+#                  max_degree=3,
+#                  strides=1,
+#                  padding='valid',
+#                  radial_function=None,
+#                  **kwargs):
+
+#         # number of radial profiles used to build the filters, w/o the central one
+#         self.n_radial_profiles = kernel_size // 2
+#         # number of atoms used to build the filters, w/o the central one
+#         self.n_atoms = (max_degree + 1)**2 * self.n_radial_profiles
+#         super().__init__(
+#             streams,
+#             kernel_size,
+#             max_degree=max_degree,
+#             strides=strides,
+#             padding=padding,
+#             **kwargs,
+#         )
+
+#     @staticmethod
+#     def _get_radial_function(input):
+#         if input is None:
+#             return lambda r, i: tri(r - i)
+#         if input == "triangle":
+#             return lambda r, i: tri(r - i)
+#         if input == "gaussian":
+#             return lambda r, i: np.exp(-0.5 * ((i - r) / 0.5)**2)
+#         if isinstance(input, Callable):
+#             return input
+
+#         raise ValueError("Unknown radial function")
+
+#     def _atoms(self):
+#         r, theta, phi = self._get_spherical_coordinates()
+#         kernel_profiles = self._compute_kernel_profiles(r)
+#         spherical_harmonics = self._compute_spherical_harmonics(theta, phi)
+
+#         kernel_profiles = kernel_profiles[:, :, :, :, np.newaxis]
+#         spherical_harmonics = spherical_harmonics[:, :, :, np.newaxis, :]
+#         atoms = kernel_profiles * spherical_harmonics
+
+#         # norm = np.sqrt(np.sum(np.conj(atoms) * atoms, axis=(0, 1, 2)))
+#         # norm[norm == 0] = 1
+#         # atoms = atoms / norm
+
+#         return tf.constant(atoms, dtype=tf.complex64)
+
+#     def _compute_kernel_profiles(self, radius):
+#         n_profiles = self.kernel_size // 2
+#         kernel_profiles = np.zeros(
+#             (
+#                 self.kernel_size,
+#                 self.kernel_size,
+#                 self.kernel_size,
+#                 n_profiles,
+#             ),
+#             dtype=np.float32,
+#         )
+#         r0s = np.arange(1, n_profiles + 1)
+#         for i, r0 in enumerate(r0s):
+#             kernel_profiles[:, :, :, i] = self.radial_function(radius, r0)
+#         return kernel_profiles
 
 class ResidualLayer3D(tf.keras.layers.Layer):
 

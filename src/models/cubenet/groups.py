@@ -1,5 +1,6 @@
 import numpy as np
 import tensorflow as tf
+import tensorflow_addons as tfa
 
 
 class V_group(object):
@@ -32,14 +33,14 @@ class V_group(object):
             # 2x 180. rotations about the z axis
             perm = [1,0,2,3]
             y = tf.transpose(x, perm=perm)
-            y = tf.contrib.image.rotate(y, angles[i])
+            y = tfa.image.rotate(y, angles[i])
             y = tf.transpose(y, perm=perm)
 
             # 2x 180. rotations about another axis
             for j in range(2):
                 perm = [2,1,0,3]
                 z = tf.transpose(y, perm=perm)
-                z = tf.contrib.image.rotate(z, angles[j])
+                z = tfa.image.rotate(z, angles[j])
                 z = tf.transpose(z, perm=perm)
                 rx.append(z)
         return rx
@@ -78,7 +79,7 @@ class T4_group(object):
         angles = [0.,np.pi/2.,np.pi,3.*np.pi/2.]
         perm = ([2,1,0,3],[0,2,1,3],[1,0,2,3])
         x = tf.transpose(x, perm=perm[axis])
-        x = tf.contrib.image.rotate(x, angles[shift])
+        x = tfa.image.rotate(x, angles[shift])
         return tf.transpose(x, perm=perm[axis])
 
 
@@ -221,26 +222,26 @@ class S4_group(object):
             # Z4 rotations about the z axis
             perm = [1,0,2,3]
             y = tf.transpose(x, perm=perm)
-            y = tf.contrib.image.rotate(y, angles[i])
+            y = tfa.image.rotate(y, angles[i])
             y = tf.transpose(y, perm=perm)
             # Rotations in the quotient space (sphere S^2)
             # i) Z4 rotations about y axis
             for j in range(4):
                 perm = [2,1,0,3]
                 z = tf.transpose(y, perm=perm)
-                z = tf.contrib.image.rotate(z, angles[-j])
+                z = tfa.image.rotate(z, angles[-j])
                 z = tf.transpose(z, perm=perm)
                 
                 rx.append(z)
             # ii) 2 rotations to the poles about the x axis
             perm = [0,2,1,3]
             z = tf.transpose(y, perm=perm)
-            z = tf.contrib.image.rotate(z, angles[3])
+            z = tfa.image.rotate(z, angles[3])
             z = tf.transpose(z, perm=perm)
             rx.append(z)
 
             z = tf.transpose(y, perm=perm)
-            z = tf.contrib.image.rotate(z, angles[1])
+            z = tfa.image.rotate(z, angles[1])
             z = tf.transpose(z, perm=perm)
             rx.append(z)
 

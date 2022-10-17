@@ -16,7 +16,7 @@ class T4_group(object):
         angles = [0.,np.pi/2.,np.pi,3.*np.pi/2.]
         perm = ([2,1,0,3],[0,2,1,3],[1,0,2,3])
         x = tf.transpose(x, perm=perm[axis])
-        x = tf.contrib.image.rotate(x, angles[shift])
+        x = tf.image.rotate(x, angles[shift])
         return tf.transpose(x, perm=perm[axis])
 
 

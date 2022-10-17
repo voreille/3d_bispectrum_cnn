@@ -36,14 +36,14 @@ class V_group(object):
             # 2x 180. rotations about the z axis
             perm = [1,0,2,3]
             y = tf.transpose(x, perm=perm)
-            y = tf.contrib.image.rotate(y, angles[i])
+            y = tf.image.rotate(y, angles[i])
             y = tf.transpose(y, perm=perm)
 
             # 2x 180. rotations about another axis
             for j in range(2):
                 perm = [2,1,0,3]
                 z = tf.transpose(y, perm=perm)
-                z = tf.contrib.image.rotate(z, angles[j])
+                z = tf.image.rotate(z, angles[j])
                 z = tf.transpose(z, perm=perm)
                 rx.append(z)
         return rx

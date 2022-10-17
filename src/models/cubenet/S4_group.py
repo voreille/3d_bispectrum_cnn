@@ -29,26 +29,26 @@ class S4_group(object):
             # Z4 rotations about the z axis
             perm = [1,0,2,3]
             y = tf.transpose(x, perm=perm)
-            y = tf.contrib.image.rotate(y, angles[i])
+            y = tf.image.rotate(y, angles[i])
             y = tf.transpose(y, perm=perm)
             # Rotations in the quotient space (sphere S^2)
             # i) Z4 rotations about y axis
             for j in range(4):
                 perm = [2,1,0,3]
                 z = tf.transpose(y, perm=perm)
-                z = tf.contrib.image.rotate(z, angles[-j])
+                z = tf.image.rotate(z, angles[-j])
                 z = tf.transpose(z, perm=perm)
                 
                 rx.append(z)
             # ii) 2 rotations to the poles about the x axis
             perm = [0,2,1,3]
             z = tf.transpose(y, perm=perm)
-            z = tf.contrib.image.rotate(z, angles[3])
+            z = tf.image.rotate(z, angles[3])
             z = tf.transpose(z, perm=perm)
             rx.append(z)
 
             z = tf.transpose(y, perm=perm)
-            z = tf.contrib.image.rotate(z, angles[1])
+            z = tf.image.rotate(z, angles[1])
             z = tf.transpose(z, perm=perm)
             rx.append(z)
 

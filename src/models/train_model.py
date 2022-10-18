@@ -1,3 +1,8 @@
+"""
+TODO: fine-tune hp ? maybe see https://www.tensorflow.org/tensorboard/hyperparameter_tuning_with_hparams
+TODO: lr scheduler and early stopping?
+"""
+
 from pathlib import Path
 import os
 import datetime
@@ -36,7 +41,7 @@ pp = pprint.PrettyPrinter(depth=4)
 @click.option("--gpu-id", type=click.STRING, default="0", help="gpu id")
 @click.option("--memory-limit",
               type=click.FLOAT,
-              default=40,
+              default=None,
               help="GPU memory limit in GB")
 @click.option("--split-id", type=click.INT, default=0, help="split id")
 @click.option(
@@ -76,7 +81,7 @@ def main(config, gpu_id, memory_limit, split_id, output_path, log_path):
     )
     ds_train = tf_data_creator.get_tf_data(
         ids_train,
-        data_augmentation=False,
+        data_augmentation=config["data"]["data_augmentation"],
     ).batch(config["training"]["batch_size"])
 
     ds_val = tf_data_creator.get_tf_data(

@@ -4,19 +4,21 @@ preprocessing:
 
 data:
   patch_size: [64, 64, 64]
+  data_augmentation: False
   augmentation:
     rotation: False
     random_center: True
 
 model:
-  model_name: "SLRIUnet"
-  mixed_precision: true
+  model_name: "S4Unet"
+  mixed_precision: True
   output_channels: 3
-  kernel_size: 5
-  last_activation: "sigmoid"
+  kernel_size: 3
+  last_activation: "softmax"
   # n_features: [12, 24, 48, 96, 192]
   n_features: [4, 8, 16, 32, 64]
   # n_features: [2, 4, 8, 16, 32]
+  # n_features: [1, 2, 4, 8, 32]
   # n_features: [1, 1, 1, 1, 1]
   compile:
     optimizer: "adam"
@@ -29,4 +31,4 @@ model:
 
 training:
   epochs: 200
-  batch_size: 1
+  batch_size: 2

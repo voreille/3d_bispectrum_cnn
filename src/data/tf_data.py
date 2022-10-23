@@ -122,8 +122,13 @@ class TFDataCreator():
             ds.shuffle(150)
 
         if data_augmentation:
-            ds = ds.map(self.tf_parse_image_random_center,
-                        num_parallel_calls=self.num_parallel_calls)
+            if self.params_augmentation.get("random_center", False):
+                ds = ds.map(self.tf_parse_image_random_center,
+                            num_parallel_calls=self.num_parallel_calls)
+            else:
+                ds = ds.map(self.tf_parse_image,
+                            num_parallel_calls=self.num_parallel_calls)
+
             if self.params_augmentation.get("rotation", False):
                 data_augmenter = RightAngleRotation(p=1.0)
                 ds = ds.map(data_augmenter,

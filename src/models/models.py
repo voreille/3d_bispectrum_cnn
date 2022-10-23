@@ -1,10 +1,9 @@
 from pathlib import Path
-from matplotlib.pyplot import axis
 
 import tensorflow as tf
 import yaml
 
-from src.models.layers_faster import BSHConv3D, SSHConv3D
+from src.models.layers_faster import BSHConv3D, SSHConv3D, LinearUpsampling3D
 from src.models.residual_layers import ResidualGLayer3D, ResidualLayer3D
 from src.models.losses import dice_loss, dice_coefficient_hard
 from src.models.cubenet.layers import GroupConv, MaxPoolG, UpsamplingG
@@ -29,8 +28,10 @@ def get_compiled_model(params, run_eagerly=False):
     model_name = params["model_name"]
     model_params = {
         k: i
-        for k, i in params.items() if k in
-        ["output_channels", "n_features", "last_activation", "kernel_size"]
+        for k, i in params.items() if k in [
+            "output_channels", "n_features", "last_activation", "kernel_size",
+            "linear_upsampling"
+        ]
     }
     if model_name == "Unet":
         model = Unet(conv_type="standard", **model_params)
@@ -44,13 +45,12 @@ def get_compiled_model(params, run_eagerly=False):
         model = GUnet(group="S4", **model_params)
     elif model_name == "T4Unet":
         model = GUnet(group="T4", **model_params)
+    elif model_name == "S4UnetWeighSharing":
+        model = GUnet(group="S4", share_weights=True, **model_params)
     else:
         raise ValueError(f"Model {model_name} not implemented")
 
-    return compile_model(model,
-                         params["compile"],
-                         output_channels=params["output_channels"],
-                         run_eagerly=run_eagerly)
+    return compile_model(model, params["compile"], run_eagerly=run_eagerly)
 
 
 def dice_0(y_true, y_pred):
@@ -70,13 +70,8 @@ def crossentropy(y_true, y_pred):
     return tf.reduce_mean(l, axis=(1, 2, 3))
 
 
-def compile_model(model, params, output_channels=3, run_eagerly=False):
-    if params["optimizer"] == "adam":
-        # lr = tf.keras.optimizers.schedules.ExponentialDecay(
-        #     **params["lr_scheduler"], )
-        optimizer = tf.keras.optimizers.Adam(params["learning_rate"])
-    else:
-        raise ValueError(f"Optimizer {params['optimizer']} not implemented")
+def compile_model(model, params, run_eagerly=False):
+    optimizer = tf.keras.optimizers.get(params["optimizer"])
 
     if params["loss"] == "dsc":
         loss = lambda y_true, y_pred: tf.reduce_mean(
@@ -155,6 +150,8 @@ class Unet(tf.keras.Model):
         n_features=None,
         kernel_size=3,
         conv_type="standard",
+        linear_upsampling=True,
+        use_batch_norm=True,
     ):
         super().__init__()
         self.kernel_size = kernel_size
@@ -162,7 +159,9 @@ class Unet(tf.keras.Model):
             n_features = [12, 24, 48, 96, 192]
         self.output_channels = output_channels
         self.last_activation = last_activation
+        self.use_batch_norm = use_batch_norm
         self.conv_type = conv_type
+        self.linear_upsampling = linear_upsampling
         self.conv_constructor = self.CONV[conv_type]
         self.stem = self.get_first_block(n_features[0])
         self.down_stack = [
@@ -239,11 +238,13 @@ class Unet(tf.keras.Model):
                             7,
                             padding='SAME',
                             activation="relu",
+                            use_batch_norm=self.use_batch_norm,
                             conv_type=self.conv_type),
             ResidualLayer3D(filters,
                             self.kernel_size,
                             padding='SAME',
                             activation="relu",
+                            use_batch_norm=self.use_batch_norm,
                             conv_type=self.conv_type),
         ])
 
@@ -253,39 +254,40 @@ class Unet(tf.keras.Model):
                             self.kernel_size,
                             padding='SAME',
                             activation="relu",
+                            use_batch_norm=self.use_batch_norm,
                             conv_type=self.conv_type),
             ResidualLayer3D(filters,
                             self.kernel_size,
                             padding='SAME',
                             activation="relu",
+                            use_batch_norm=self.use_batch_norm,
                             conv_type=self.conv_type),
             ResidualLayer3D(filters,
                             self.kernel_size,
                             padding='SAME',
                             activation="relu",
+                            use_batch_norm=self.use_batch_norm,
                             conv_type=self.conv_type),
         ])
 
-    def get_conv_block(self, filters):
-        return tf.keras.Sequential([
-            self.conv_constructor(filters,
-                                  self.kernel_size,
-                                  padding='SAME',
-                                  activation="relu"),
-            self.conv_constructor(filters,
-                                  self.kernel_size,
-                                  padding='SAME',
-                                  activation="relu"),
-        ])
+    def get_conv_block(self, filters, n_conv=2):
+        block = tf.keras.Sequential()
+        for _ in range(n_conv):
+            block.add(
+                self.conv_constructor(filters,
+                                      self.kernel_size,
+                                      padding='SAME',
+                                      activation="linear"))
+            if self.use_batch_norm:
+                block.add(tf.keras.layers.BatchNormalization())
+            block.add(tf.keras.layers.ReLU())
+        return block
 
     def get_upsampling_block(self, filters):
-        return tf.keras.Sequential([
-            tf.keras.layers.UpSampling3D(),
-            # tf.keras.layers.Conv3D(filters,
-            #                        3,
-            #                        padding='SAME',
-            #                        activation="relu"),
-        ])
+        if self.linear_upsampling:
+            return LinearUpsampling3D(size=(2, 2, 2))
+        else:
+            return tf.keras.layers.UpSampling3D()
 
 
 class GUnet(tf.keras.Model):
@@ -298,11 +300,14 @@ class GUnet(tf.keras.Model):
         kernel_size=3,
         group="S4",
         use_batch_norm=True,
+        share_weights=False,
+        linear_upsampling=True,
     ):
         super().__init__()
         self.kernel_size = kernel_size
         self.group = group
         self.use_batch_norm = use_batch_norm
+        self.share_weights = share_weights
 
         if n_features is None:
             n_features = [12, 24, 48, 96, 192]
@@ -383,35 +388,50 @@ class GUnet(tf.keras.Model):
 
     def get_first_block(self, filters):
         return tf.keras.Sequential([
-            ResidualGLayer3D(filters,
-                             7,
-                             padding='SAME',
-                             activation="relu",
-                             group=self.group),
-            ResidualGLayer3D(filters,
-                             self.kernel_size,
-                             padding='SAME',
-                             activation="relu",
-                             group=self.group),
+            ResidualGLayer3D(
+                filters,
+                7,
+                padding='SAME',
+                activation="relu",
+                group=self.group,
+                share_weights=self.share_weights,
+            ),
+            ResidualGLayer3D(
+                filters,
+                self.kernel_size,
+                padding='SAME',
+                activation="relu",
+                group=self.group,
+                share_weights=self.share_weights,
+            ),
         ])
 
     def get_residual_block(self, filters):
         return tf.keras.Sequential([
-            ResidualGLayer3D(filters,
-                             self.kernel_size,
-                             padding='SAME',
-                             activation="relu",
-                             group=self.group),
-            ResidualGLayer3D(filters,
-                             self.kernel_size,
-                             padding='SAME',
-                             activation="relu",
-                             group=self.group),
-            ResidualGLayer3D(filters,
-                             self.kernel_size,
-                             padding='SAME',
-                             activation="relu",
-                             group=self.group),
+            ResidualGLayer3D(
+                filters,
+                self.kernel_size,
+                padding='SAME',
+                activation="relu",
+                group=self.group,
+                share_weights=self.share_weights,
+            ),
+            ResidualGLayer3D(
+                filters,
+                self.kernel_size,
+                padding='SAME',
+                activation="relu",
+                group=self.group,
+                share_weights=self.share_weights,
+            ),
+            ResidualGLayer3D(
+                filters,
+                self.kernel_size,
+                padding='SAME',
+                activation="relu",
+                group=self.group,
+                share_weights=self.share_weights,
+            ),
         ])
 
     def get_conv_block(self, filters, n_conv=2):
@@ -424,6 +444,7 @@ class GUnet(tf.keras.Model):
                     padding='SAME',
                     activation="linear",
                     group=self.group,
+                    share_weights=self.share_weights,
                 ))
             if self.use_batch_norm:
                 block.add(tf.keras.layers.BatchNormalization(axis=-2))
@@ -431,4 +452,4 @@ class GUnet(tf.keras.Model):
         return block
 
     def get_upsampling_block(self, filters):
-        return UpsamplingG()
+        return UpsamplingG(linear_upsampling=self.linear_upsampling)

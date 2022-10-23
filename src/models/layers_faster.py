@@ -30,21 +30,28 @@ class BSHConv3D(tf.keras.layers.Layer):
                  max_degree=3,
                  strides=1,
                  padding='SAME',
-                 kernel_initializer="random_normal",
+                 kernel_initializer="glorot_uniform",
                  use_bias=True,
                  bias_initializer="zeros",
                  radial_profile_type="radial",
                  activation="linear",
                  proj_activation="relu",
                  proj_initializer="glorot_uniform",
-                 is_transpose=False,
                  project=True,
                  **kwargs):
         super().__init__(**kwargs)
         self.filters = filters
         self.max_degree = max_degree
-        self.output_bispectrum_channels = self._output_bispectrum_channels()
-        self._indices = None
+        self._indices = (
+            (0, 0, 0),
+            (0, 1, 1),
+            (0, 2, 2),
+            (1, 1, 2),
+            (1, 2, 1),
+            (1, 2, 3),
+        )
+        self.output_bispectrum_channels = len(self._indices)
+
         self._indices_inverse = None
         self.activation = tf.keras.activations.get(activation)
         self.clebschgordan_matrix = self._compute_clebschgordan_matrix()
@@ -56,7 +63,6 @@ class BSHConv3D(tf.keras.layers.Layer):
             strides=strides,
             padding=padding,
             kernel_initializer=kernel_initializer,
-            # is_transpose=is_transpose,
             **kwargs)
 
         if use_bias:
@@ -80,12 +86,13 @@ class BSHConv3D(tf.keras.layers.Layer):
             self.proj_conv = None
 
     def _output_bispectrum_channels(self):
-        n_outputs = 0
-        for n1 in range(0, math.floor(self.max_degree / 2) + 1):
-            for n2 in range(n1, math.ceil(self.max_degree / 2) + 1):
-                for i in range(np.abs(n1 - n2), n1 + n2 + 1):
-                    n_outputs += 1
-        return n_outputs
+        return len(self._indices)
+        # n_outputs = 0
+        # for n1 in range(0, math.floor(self.max_degree / 2) + 1):
+        #     for n2 in range(n1, math.ceil(self.max_degree / 2) + 1):
+        #         for i in range(np.abs(n1 - n2), n1 + n2 + 1):
+        #             n_outputs += 1
+        # return n_outputs
 
     def _compute_clebschgordan_matrix(self):
         cg_mat = {}  # the set of cg matrices
@@ -160,39 +167,37 @@ class BSHConv3D(tf.keras.layers.Layer):
 
     # @tf.function
     def get_bisp_feature_maps(self, sh_feature_maps):
-        batch_size, depth, height, width, filters, n_harmonics = sh_feature_maps.get_shape(
+        _, depth, height, width, filters, n_harmonics = sh_feature_maps.get_shape(
         ).as_list()
+        batch_size = tf.shape(sh_feature_maps)[0]
         sh_feature_maps = tf.reshape(sh_feature_maps, [-1, n_harmonics])
 
         bispectrum_coeffs = []
-        for n1 in range(0, math.floor(self.max_degree / 2) + 1):
-            for n2 in range(n1, math.ceil(self.max_degree / 2) + 1):
-                kronecker_product = []
-                for m1 in degree_to_indices_range(n1):
-                    kronecker_product.append(
-                        tf.expand_dims(sh_feature_maps[..., m1], -1) *
-                        sh_feature_maps[..., degree_to_indices_slice(n2)])
-                kronecker_product = tf.concat(kronecker_product, axis=-1)
-                kronp_clebshgordan = tf.matmul(
-                    kronecker_product, self.clebschgordan_matrix[(n1, n2)])
+        for n1, n2, i in self._indices:
+            kronecker_product = []
+            for m1 in degree_to_indices_range(n1):
+                kronecker_product.append(
+                    tf.expand_dims(sh_feature_maps[..., m1], -1) *
+                    sh_feature_maps[..., degree_to_indices_slice(n2)])
+            kronecker_product = tf.concat(kronecker_product, axis=-1)
+            kronp_clebshgordan = tf.matmul(kronecker_product,
+                                           self.clebschgordan_matrix[(n1, n2)])
 
-                for i in range(np.abs(n1 - n2), n1 + n2 + 1):
-                    n_p = i**2 - (n1 - n2)**2
-                    Fi = tf.math.conj(
-                        sh_feature_maps[..., degree_to_indices_slice(i)])
+            n_p = i**2 - (n1 - n2)**2
+            Fi = tf.math.conj(sh_feature_maps[..., degree_to_indices_slice(i)])
 
-                    if (n1 + n2 + i) % 2 == 0:
-                        bispectrum_coeffs.append(
-                            tf.math.real(
-                                tf.reduce_sum(
-                                    kronp_clebshgordan[:, n_p:n_p + 2 * i + 1]
-                                    * Fi, -1)))
-                    else:
-                        bispectrum_coeffs.append(
-                            tf.math.imag(
-                                tf.reduce_sum(
-                                    kronp_clebshgordan[:, n_p:n_p + 2 * i + 1]
-                                    * Fi, -1)))
+            if (n1 + n2 + i) % 2 == 0:
+                bispectrum_coeffs.append(
+                    tf.math.real(
+                        tf.reduce_sum(
+                            kronp_clebshgordan[:, n_p:n_p + 2 * i + 1] * Fi,
+                            -1)))
+            else:
+                bispectrum_coeffs.append(
+                    tf.math.imag(
+                        tf.reduce_sum(
+                            kronp_clebshgordan[:, n_p:n_p + 2 * i + 1] * Fi,
+                            -1)))
         bispectrum_coeffs = tf.stack(bispectrum_coeffs, -1)
         return tf.reshape(bispectrum_coeffs, [
             batch_size,
@@ -204,8 +209,11 @@ class BSHConv3D(tf.keras.layers.Layer):
 
     def call(self, inputs):
         real_x, imag_x = self.conv_sh(inputs)
-        x = self.get_bisp_feature_maps(tf.complex(real_x, imag_x))
+        x = self.get_bisp_feature_maps(
+            tf.complex(tf.cast(real_x, tf.float32),
+                       tf.cast(imag_x, tf.float32)))
         x = tf.math.sign(x) * tf.math.log(1 + tf.math.abs(x))
+        x = tf.cast(x, inputs.dtype)
         if self.bias is not None:
             x = x + self.bias
         x = self.activation(x)
@@ -393,8 +401,7 @@ class SHConv3D(tf.keras.layers.Layer):
         self.filters = filters
         self.max_degree = max_degree
         self.n_harmonics = (max_degree + 1)**2
-        self.kernel_size = kernel_size if type(kernel_size) is tuple else (
-            kernel_size, kernel_size, kernel_size)
+        self.kernel_size = np.max(kernel_size)
         self.strides = strides if type(strides) is not int else 5 * (strides, )
         self.padding = padding.upper()
         self.sh_indices = list(self._sh_indices())
@@ -407,24 +414,31 @@ class SHConv3D(tf.keras.layers.Layer):
                                                              strides=strides,
                                                              padding="SAME")
         else:
+            crop = self.kernel_size // 2
             self.conv_central_pixel = tf.keras.Sequential([
                 tf.keras.layers.Conv3D(filters,
                                        1,
                                        strides=strides,
                                        padding="SAME"),
-                tf.keras.layers.Cropping3D(cropping=(self.kernel_size[0] // 2,
-                                                     self.kernel_size[1] // 2,
-                                                     self.kernel_size[2] //
-                                                     2)),
+                tf.keras.layers.Cropping3D(cropping=(
+                    (crop, crop),
+                    (crop, crop),
+                    (crop, crop),
+                ))
             ])
 
     def build(self, input_shape):
-        if self.kernel_initializer == "glorot_adapted":
-            limit = limit_glorot(input_shape[-1], self.filters)
-            kernel_initializer = tf.keras.initializers.RandomUniform(
-                minval=-limit, maxval=limit),
-        else:
-            kernel_initializer = self.kernel_initializer
+        # if self.kernel_initializer == "glorot_adapted":
+        #     limit = limit_glorot(input_shape[-1], self.filters)
+        #     kernel_initializer = tf.keras.initializers.RandomUniform(
+        #         minval=-limit, maxval=limit)
+        # else:
+        #     kernel_initializer = self.kernel_initializer
+
+        limit = limit_glorot(input_shape[-1], self.filters)
+        limit = 0.005
+        kernel_initializer = tf.keras.initializers.RandomUniform(minval=-limit,
+                                                                 maxval=limit)
 
         self.w = self.add_weight(
             shape=(
@@ -455,7 +469,6 @@ class SHConv3D(tf.keras.layers.Layer):
 
         real_filters = tf.cast(tf.math.real(filters), inputs.dtype)
         imag_filters = tf.cast(tf.math.imag(filters), inputs.dtype)
-        logger.info(f"SHConv3D: real filters dtype cast to: {inputs.dtype}")
         reals = list()
         imags = list()
         xs = tf.unstack(inputs, axis=-1)
@@ -575,7 +588,7 @@ class SHConv3DRadial(SHConv3D, name="radial"):
         self.radial_function = SHConv3DRadial._get_radial_function(
             radial_function)
         # number of radial profiles used to build the filters, w/o the central one
-        self.n_radial_profiles = kernel_size // 2
+        self.n_radial_profiles = np.max(kernel_size) // 2
         # number of atoms used to build the filters, w/o the central one
         self.n_atoms = (max_degree + 1)**2 * self.n_radial_profiles
         super().__init__(

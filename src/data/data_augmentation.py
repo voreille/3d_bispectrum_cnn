@@ -43,29 +43,34 @@ class GaussianBlur(object):
 
 class RightAngleRotation(object):
     """
-    Apply Gaussian Blur to the PIL image.
+    Apply the same transformation to a liste of 3D images.
     """
 
     def __init__(self, p=0.5):
         self.prob = p
 
-    def __call__(self, *images):
+    def __call__(self, image, segmentation):
+        image_shape = image.shape
+        segmentation_shape = segmentation.shape
+        image, segmentation = tf.py_function(self.call, [image, segmentation],
+                                             [tf.float32, tf.float32])
+        image.set_shape(image_shape)
+        segmentation.set_shape(segmentation_shape)
+        return image, segmentation
+
+    def call(self, image, segmentation):
         do_it = random.random() <= self.prob
         if not do_it:
-            return images
+            return image, segmentation
         permutation = random.sample([0, 1, 2], 3)
         permutation.append(3)
         flips = np.random.randint(2, size=(3, )) == 1
-        output_images = []
-        for image in images:
-            image_shape = image.shape
-            image = tf.py_function(self.call, [image, permutation, flips],
-                                   tf.float32)
-            image.set_shape(image_shape)
-            output_images.append(image)
-        return output_images
 
-    def call(self, img, permutation, flips):
+        image = self.apply(image, permutation, flips)
+        segmentation = self.apply(segmentation, permutation, flips)
+        return image, segmentation
+
+    def apply(self, img, permutation, flips):
         if hasattr(img, "numpy"):
             img = img.numpy()
 

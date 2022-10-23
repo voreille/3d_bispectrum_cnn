@@ -6,7 +6,7 @@ ARG USER_GID=$USER_UID
 
 RUN apt-get update \
     && apt-get upgrade -y \
-    && apt-get install -y git
+    && apt-get install -y git \
     && apt-get install -y nvtop
 
 # Create the user

@@ -4,25 +4,33 @@ preprocessing:
 
 data:
   patch_size: [64, 64, 64]
-  data_augmentation: False
+  data_augmentation: True
   augmentation:
-    rotation: False
+    rotation: True
     random_center: True
 
 model:
-  model_name: "S4Unet"
+  model_name: "Unet"
   mixed_precision: True
   output_channels: 3
   kernel_size: 3
   last_activation: "softmax"
+  linear_upsampling: True
   # n_features: [12, 24, 48, 96, 192]
-  n_features: [4, 8, 16, 32, 64]
+  n_features: [8, 16, 32, 64, 128] # Best results from HP for standard CNN
+  # n_features: [4, 8, 16, 32, 64]
   # n_features: [2, 4, 8, 16, 32]
   # n_features: [1, 2, 4, 8, 32]
   # n_features: [1, 1, 1, 1, 1]
   compile:
-    optimizer: "adam"
-    learning_rate: 0.001
+    # optimizer: "adam"
+    optimizer:
+      class_name: "SGD"
+      config:
+        learning_rate: 0.01
+        nesterov: true
+        momentum: 0.99
+
     # lr_scheduler:
     #   initial_learning_rate: 0.01
     #   decay_steps: 10000
@@ -30,5 +38,10 @@ model:
     loss: "dsc"
 
 training:
-  epochs: 200
+  # epochs: 1000
+  epochs: 2
+  # steps_per_epoch: 250
+  steps_per_epoch: 25
   batch_size: 2
+  lr_scheduler:
+    power: 0.9

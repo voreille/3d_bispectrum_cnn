@@ -19,6 +19,8 @@
 	// "postCreateCommand": "apt-get update && apt-get install -y curl",
 	// Uncomment when using a ptrace-based debugger like C++, Go, and Rust
 	"runArgs": [
+		"--name",
+		"cool_poitras",
 		"--gpus",
 		"all",
 		"--ipc=host"

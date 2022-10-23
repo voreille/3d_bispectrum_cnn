@@ -7,6 +7,7 @@ import sys
 import tensorflow as tf
 
 from src.models.cubenet.groups import V_group, T4_group, S4_group_faster
+from src.models.layers_faster import LinearUpsampling3D
 
 
 class GroupConv(tf.keras.layers.Layer):
@@ -64,6 +65,7 @@ class GroupConv(tf.keras.layers.Layer):
             group_dim = 1
         else:
             group_dim = input_shape[-1]
+
         self.kernel = self.add_weight(
             name="kernel",
             shape=(
@@ -173,10 +175,12 @@ class MaxPoolG(tf.keras.layers.Layer):
 
 class UpsamplingG(tf.keras.layers.Layer):
 
-    def __init__(self, size=(2, 2, 2), data_format=None, name=None):
+    def __init__(self, size=(2, 2, 2), linear_upsampling=True, name=None):
         super().__init__(name=name)
-        self.upsampling = tf.keras.layers.UpSampling3D(size=size,
-                                                       data_format=data_format)
+        if linear_upsampling:
+            self.upsampling = LinearUpsampling3D(size=size)
+        else:
+            self.upsampling = tf.keras.layers.UpSampling3D(size=size)
 
     def call(self, x):
         _, depth, height, width, channels, group_dim = x.get_shape().as_list()

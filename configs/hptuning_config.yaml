@@ -1,0 +1,26 @@
+preprocessing:
+  clip_value_min: -100
+  clip_value_max: 200
+
+data:
+  patch_size: [64, 64, 64]
+  data_augmentation: True
+  augmentation:
+    rotation: True
+    random_center: True
+
+model:
+  model_name: "BLRIUnet"
+  mixed_precision: True
+  output_channels: 3
+  kernel_size: 3
+  last_activation: "softmax"
+  n_features: [4, 8, 16, 32, 64]
+  compile:
+    optimizer: "adam"
+    learning_rate: 0.001
+    loss: "dsc"
+
+training:
+  epochs: 500
+  batch_size: 2

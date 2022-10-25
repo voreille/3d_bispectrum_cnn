@@ -50,7 +50,7 @@ class BSHConv3D(tf.keras.layers.Layer):
             (1, 2, 1),
             (1, 2, 3),
         )
-        self.output_bispectrum_channels = len(self._indices)
+        self.output_bispectrum_channels = self._output_bispectrum_channels()
 
         self._indices_inverse = None
         self.activation = tf.keras.activations.get(activation)
@@ -87,6 +87,7 @@ class BSHConv3D(tf.keras.layers.Layer):
 
     def _output_bispectrum_channels(self):
         return len(self._indices)
+        # return self.max_degree + 1
         # n_outputs = 0
         # for n1 in range(0, math.floor(self.max_degree / 2) + 1):
         #     for n2 in range(n1, math.ceil(self.max_degree / 2) + 1):
@@ -122,9 +123,10 @@ class BSHConv3D(tf.keras.layers.Layer):
                 self._indices_inverse[(n1, n2, i)] = k
         return self._indices_inverse
 
-    def get_bisp_feature_maps_faster(self, sh_feature_maps):
-        batch_size, depth, height, width, filters, n_harmonics = sh_feature_maps.get_shape(
+    def get_bisp_feature_maps_old(self, sh_feature_maps):
+        _, depth, height, width, filters, n_harmonics = sh_feature_maps.get_shape(
         ).as_list()
+        batch_size = tf.shape(sh_feature_maps)[0]
         sh_feature_maps = tf.reshape(sh_feature_maps, [-1, n_harmonics])
 
         bispectrum_coeffs = []
@@ -173,18 +175,19 @@ class BSHConv3D(tf.keras.layers.Layer):
         sh_feature_maps = tf.reshape(sh_feature_maps, [-1, n_harmonics])
 
         bispectrum_coeffs = []
-        for n1, n2, i in self._indices:
+        for n1, n2, i in self.indices:
             kronecker_product = []
-            for m1 in degree_to_indices_range(n1):
+            f_n1 = self._get_fn(sh_feature_maps, n1)
+            for m1 in range(2 * n1 + 1):
                 kronecker_product.append(
-                    tf.expand_dims(sh_feature_maps[..., m1], -1) *
-                    sh_feature_maps[..., degree_to_indices_slice(n2)])
+                    tf.expand_dims(f_n1[..., m1], -1) *
+                    self._get_fn(sh_feature_maps, n2))
             kronecker_product = tf.concat(kronecker_product, axis=-1)
             kronp_clebshgordan = tf.matmul(kronecker_product,
                                            self.clebschgordan_matrix[(n1, n2)])
 
             n_p = i**2 - (n1 - n2)**2
-            Fi = tf.math.conj(sh_feature_maps[..., degree_to_indices_slice(i)])
+            Fi = tf.math.conj(self._get_fn(sh_feature_maps, i))
 
             if (n1 + n2 + i) % 2 == 0:
                 bispectrum_coeffs.append(
@@ -207,59 +210,48 @@ class BSHConv3D(tf.keras.layers.Layer):
             filters * self.output_bispectrum_channels,
         ])
 
-    def call(self, inputs):
-        real_x, imag_x = self.conv_sh(inputs)
-        x = self.get_bisp_feature_maps(
-            tf.complex(tf.cast(real_x, tf.float32),
-                       tf.cast(imag_x, tf.float32)))
+    def _get_spectrum_feature_maps(
+        self,
+        x,
+    ):
+        # Iterating over a symbolic `tf.Tensor` is not allowed: AutoGraph did convert this function
+        batch_size = tf.shape(x)[0]
+        depth = tf.shape(x)[1]
+        height = tf.shape(x)[2]
+        width = tf.shape(x)[3]
+        filters = tf.shape(x)[4]
+
+        spect_feature_maps = []
+        for n in range(self.max_degree + 1):
+            spect_feature_maps.append(1 / (2 * n + 1) * tf.reduce_sum(
+                self._get_fn(tf.math.real(x), n)**2 +
+                self._get_fn(tf.math.imag(x), n)**2, -1))
+        spect_feature_maps = tf.stack(spect_feature_maps, -1)
+        return tf.reshape(spect_feature_maps, [
+            batch_size,
+            depth,
+            height,
+            width,
+            filters * (self.max_degree + 1),
+        ])
+
+    def _get_fn(self, x, n):
+        return x[..., n * n:n * n + 2 * n + 1]
+
+    def call(self, inputs, training=None):
+        real_x, imag_x = self.conv_sh(inputs, training=training)
+        # x = self.get_bisp_feature_maps(
+        #     tf.complex(tf.cast(real_x, tf.float32),
+        #                tf.cast(imag_x, tf.float32)))
+        x = tf.complex(real_x, imag_x)
+        x = self.get_bisp_feature_maps(x)
         x = tf.math.sign(x) * tf.math.log(1 + tf.math.abs(x))
-        x = tf.cast(x, inputs.dtype)
+        # x = tf.cast(x, inputs.dtype)
         if self.bias is not None:
             x = x + self.bias
         x = self.activation(x)
         if self.proj_conv is not None:
             x = self.proj_conv(x)
-        return x
-
-
-class BSHConv3DComplex(BSHConv3D):
-
-    def _get_fn(self, x, n):
-        return x[..., n * n:n * n + 2 * n + 1]
-
-    def _get_kron_product(self, f1, f2):
-        kronecker_product = []
-        for m1 in range(f1.shape[-1]):
-            kronecker_product.append(tf.expand_dims(f1[..., m1], -1) * f2)
-        return tf.concat(kronecker_product, axis=-1)
-
-    def get_bisp_feature_maps(self, sh_feature_maps):
-        batch_size, depth, height, width, filters, n_harmonics = tf.shape(
-            sh_feature_maps)
-        sh_feature_maps = tf.reshape(sh_feature_maps, [-1, n_harmonics])
-        bisp_feature_maps = []
-        for n1 in range(0, math.floor(self.max_degree / 2) + 1):
-            for n2 in range(n1, math.ceil(self.max_degree / 2) + 1):
-                x = self._get_kron_product(self._get_fn(sh_feature_maps, n1),
-                                           self._get_fn(sh_feature_maps, n2))
-                x = tf.matmul(x, self.clebschgordan_matrix[(n1, n2)])
-                for i in range(np.abs(n1 - n2), n1 + n2 + 1):
-                    n_p = i**2 - (n1 - n2)**2
-                    Fi = tf.math.conj(self._get_fn(sh_feature_maps, i))
-                    bisp_feature_maps.append(
-                        tf.reduce_sum(x[:, n_p:n_p + 2 * i + 1] * Fi, -1))
-        bisp_feature_maps = tf.stack(bisp_feature_maps, -1)
-        return tf.reshape(bisp_feature_maps, [
-            batch_size,
-            depth,
-            height,
-            width,
-            filters * self.output_bispectrum_channels,
-        ])
-
-    def call(self, inputs):
-        x = self.conv_sh(inputs)
-        x = self.get_bisp_feature_maps(x)
         return x
 
 
@@ -428,17 +420,17 @@ class SHConv3D(tf.keras.layers.Layer):
             ])
 
     def build(self, input_shape):
-        # if self.kernel_initializer == "glorot_adapted":
-        #     limit = limit_glorot(input_shape[-1], self.filters)
-        #     kernel_initializer = tf.keras.initializers.RandomUniform(
-        #         minval=-limit, maxval=limit)
-        # else:
-        #     kernel_initializer = self.kernel_initializer
+        if self.kernel_initializer == "glorot_adapted":
+            limit = limit_glorot(input_shape[-1], self.filters)
+            kernel_initializer = tf.keras.initializers.RandomUniform(
+                minval=-limit, maxval=limit)
+        else:
+            kernel_initializer = self.kernel_initializer
 
-        limit = limit_glorot(input_shape[-1], self.filters)
-        limit = 0.005
-        kernel_initializer = tf.keras.initializers.RandomUniform(minval=-limit,
-                                                                 maxval=limit)
+        # limit = limit_glorot(input_shape[-1], self.filters)
+        # limit = 0.005
+        # kernel_initializer = tf.keras.initializers.RandomUniform(minval=-limit,
+        #                                                          maxval=limit)
 
         self.w = self.add_weight(
             shape=(
@@ -618,7 +610,10 @@ class SHConv3DRadial(SHConv3D, name="radial"):
         kernel_profiles = self._compute_kernel_profiles(r)
         spherical_harmonics = self._compute_spherical_harmonics(theta, phi)
 
+        norm = np.sqrt(np.sum(kernel_profiles**2, axis=(0, 1, 2)))
+        kernel_profiles = kernel_profiles / norm
         kernel_profiles = kernel_profiles[:, :, :, :, np.newaxis]
+
         spherical_harmonics = spherical_harmonics[:, :, :, np.newaxis, :]
         atoms = kernel_profiles * spherical_harmonics
 

@@ -29,14 +29,20 @@ def get_compiled_model(params, run_eagerly=False):
     model_params = {
         k: i
         for k, i in params.items() if k in [
-            "output_channels", "n_features", "last_activation", "kernel_size",
-            "linear_upsampling"
+            "output_channels",
+            "n_features",
+            "last_activation",
+            "kernel_size",
+            "linear_upsampling",
+            "use_batch_norm",
         ]
     }
     if model_name == "Unet":
         model = Unet(conv_type="standard", **model_params)
     elif model_name == "BLRIUnet":
         model = Unet(conv_type="bispectral", **model_params)
+    elif model_name == "BLRIUnetLight":
+        model = UnetLight(conv_type="bispectral", **model_params)
     elif model_name == "SLRIUnet":
         model = Unet(conv_type="spectral", **model_params)
     elif model_name == "DebugNet":
@@ -308,6 +314,7 @@ class GUnet(tf.keras.Model):
         self.group = group
         self.use_batch_norm = use_batch_norm
         self.share_weights = share_weights
+        self.linear_upsampling = linear_upsampling
 
         if n_features is None:
             n_features = [12, 24, 48, 96, 192]
@@ -453,3 +460,139 @@ class GUnet(tf.keras.Model):
 
     def get_upsampling_block(self, filters):
         return UpsamplingG(linear_upsampling=self.linear_upsampling)
+
+
+class UnetLight(tf.keras.Model):
+    CONV = {
+        "standard": tf.keras.layers.Conv3D,
+        "bispectral": BSHConv3D,
+        "spectral": SSHConv3D,
+    }
+
+    def __init__(
+        self,
+        output_channels=1,
+        last_activation="sigmoid",
+        n_features=None,
+        kernel_size=3,
+        conv_type="standard",
+        linear_upsampling=True,
+        use_batch_norm=True,
+    ):
+        super().__init__()
+        self.kernel_size = kernel_size
+        if n_features is None:
+            n_features = [12, 24, 48, 96, 192]
+        self.output_channels = output_channels
+        self.last_activation = last_activation
+        self.use_batch_norm = use_batch_norm
+        self.conv_type = conv_type
+        self.linear_upsampling = linear_upsampling
+        self.conv_constructor = self.CONV[conv_type]
+        self.stem = self.get_first_block(n_features[0])
+        self.down_stack = [
+            self.get_residual_block(n_features[1]),
+            self.get_residual_block(n_features[2]),
+            self.get_residual_block(n_features[3]),
+            self.get_residual_block(n_features[4]),
+        ]
+
+        self.up_stack = [
+            self.get_conv_block(n_features[4]),
+            self.get_conv_block(n_features[3]),
+            self.get_conv_block(n_features[2]),
+            self.get_conv_block(n_features[1]),
+        ]
+        self.last = tf.keras.Sequential([
+            tf.keras.layers.Conv3D(
+                output_channels,
+                1,
+                activation=last_activation,
+                dtype=tf.float32,
+                padding='SAME',
+            ),
+        ])
+        self.max_pool_stack = [
+            tf.keras.layers.MaxPool3D(),
+            tf.keras.layers.MaxPool3D(),
+            tf.keras.layers.MaxPool3D(),
+            tf.keras.layers.MaxPool3D(),
+        ]
+        self.upsampling_stack = [
+            self.get_upsampling_block(n_features[3]),
+            self.get_upsampling_block(n_features[2]),
+            self.get_upsampling_block(n_features[1]),
+            self.get_upsampling_block(n_features[0]),
+        ]
+
+    def call(self, inputs, training=None):
+        x = inputs
+        skips = []
+        x = self.stem(x)
+        for block, max_pool in zip(self.down_stack, self.max_pool_stack):
+            skips.append(x)
+            x = block(x, training=training)
+            x = max_pool(x, training=training)
+
+        skips = reversed(skips)
+
+        for block, skip, upsample in zip(self.up_stack, skips,
+                                         self.upsampling_stack):
+            x = block(
+                tf.keras.layers.concatenate([
+                    upsample(x, training=training),
+                    skip,
+                ]),
+                training=training,
+            )
+
+        return self.last(x, training=training)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "output_channels": self.output_channels,
+            "last_activation": self.last_activation,
+            "n_features": self.n_features,
+            "conv_type": self.conv_type,
+        })
+        return config
+
+    def get_first_block(self, filters):
+        return tf.keras.Sequential([
+           ResidualLayer3D(filters,
+                            self.kernel_size,
+                            padding='SAME',
+                            activation="relu",
+                            use_batch_norm=self.use_batch_norm,
+                            conv_type=self.conv_type),
+        ])
+
+    def get_residual_block(self, filters):
+        return tf.keras.Sequential([
+            ResidualLayer3D(filters,
+                            self.kernel_size,
+                            padding='SAME',
+                            activation="relu",
+                            use_batch_norm=self.use_batch_norm,
+                            conv_type=self.conv_type),
+        ])
+
+    def get_conv_block(self, filters, n_conv=1):
+        block = tf.keras.Sequential()
+        for _ in range(n_conv):
+            block.add(
+                self.conv_constructor(filters,
+                                      self.kernel_size,
+                                      padding='SAME',
+                                      activation="linear"))
+            if self.use_batch_norm:
+                block.add(tf.keras.layers.BatchNormalization())
+            block.add(tf.keras.layers.ReLU())
+        return block
+
+    def get_upsampling_block(self, filters):
+        if self.linear_upsampling:
+            return LinearUpsampling3D(size=(2, 2, 2))
+        else:
+            return tf.keras.layers.UpSampling3D()

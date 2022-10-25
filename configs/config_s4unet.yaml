@@ -1,0 +1,37 @@
+preprocessing:
+  clip_value_min: -100
+  clip_value_max: 200
+
+data:
+  patch_size: [64, 64, 64]
+  data_augmentation: True
+  augmentation:
+    rotation: True
+    random_center: True
+
+model:
+  model_name: "S4Unet"
+  mixed_precision: True
+  output_channels: 3
+  kernel_size: 3
+  last_activation: "softmax"
+  linear_upsampling: True
+  n_features: [4, 8, 16, 32, 64]
+  compile:
+    loss: "dsc"
+    optimizer:
+      class_name: "SGD"
+      config:
+        learning_rate: 0.001
+        nesterov: True
+        momentum: 0.99
+        clipnorm: 1.0
+
+training:
+  epochs: 200
+  steps_per_epoch: 250
+  batch_size: 2
+  lr_scheduler:
+    power: 0.9
+    initial_learning_rate: 0.001
+    end_learning_rate: 0.0001

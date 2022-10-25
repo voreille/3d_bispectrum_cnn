@@ -10,26 +10,32 @@ data:
     random_center: True
 
 model:
-  model_name: "Unet"
-  mixed_precision: True
+  model_name: "BLRIUnetLight"
+  use_batch_norm: False
+  mixed_precision: False
   output_channels: 3
   kernel_size: 3
   last_activation: "softmax"
   linear_upsampling: True
   # n_features: [12, 24, 48, 96, 192]
-  n_features: [8, 16, 32, 64, 128] # Best results from HP for standard CNN
+  # n_features: [8, 16, 32, 64, 128] # Best results from HP for standard CNN
   # n_features: [4, 8, 16, 32, 64]
   # n_features: [2, 4, 8, 16, 32]
-  # n_features: [1, 2, 4, 8, 32]
+  n_features: [1, 2, 4, 8, 16]
   # n_features: [1, 1, 1, 1, 1]
   compile:
-    # optimizer: "adam"
     optimizer:
-      class_name: "SGD"
+      class_name: "adam"
       config:
-        learning_rate: 0.01
-        nesterov: true
-        momentum: 0.99
+        learning_rate: 1.0e-3
+    # clipnorm: 1.0
+    # optimizer:
+    #   class_name: "SGD"
+    #   config:
+    #     learning_rate: 0.0000001
+    #     nesterov: True
+    #     momentum: 0.99
+    #     clipnorm: 0.5
 
     # lr_scheduler:
     #   initial_learning_rate: 0.01
@@ -38,10 +44,10 @@ model:
     loss: "dsc"
 
 training:
-  # epochs: 1000
-  epochs: 2
-  # steps_per_epoch: 250
-  steps_per_epoch: 25
+  epochs: 200
+  steps_per_epoch: 250
   batch_size: 2
   lr_scheduler:
     power: 0.9
+    initial_learning_rate: 1.0e-3
+    end_learning_rate: 1.0e-3

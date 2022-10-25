@@ -11,12 +11,12 @@ from dotenv import find_dotenv, load_dotenv
 import tensorflow as tf
 import pandas as pd
 
-from src.models.models import get_compiled_model
+from src.models.models import get_compiled_model, crossentropy
 from src.data.tf_data import TFDataCreator
 from src.models.utils import config_gpu
 from src.data.utils import get_split
 from src.models.callbacks import EarlyStopping
-from src.models.losses import dice_coefficient_hard
+from src.models.losses import dice_coefficient_hard, dice_loss
 
 log_fmt = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logging.basicConfig(level=logging.INFO, format=log_fmt)
@@ -26,8 +26,8 @@ project_dir = Path(__file__).resolve().parents[2]
 
 config_path = project_dir / "configs/config.yaml"
 
-DEBUG = False
-run_eagerly = False
+DEBUG = True
+run_eagerly = True
 pp = pprint.PrettyPrinter(depth=5)
 
 
@@ -36,10 +36,10 @@ pp = pprint.PrettyPrinter(depth=5)
               type=click.Path(exists=True),
               default=config_path,
               help="config file")
-@click.option("--gpu-id", type=click.STRING, default="0", help="gpu id")
+@click.option("--gpu-id", type=click.STRING, default="1", help="gpu id")
 @click.option("--memory-limit",
               type=click.FLOAT,
-              default=None,
+              default=64,
               help="GPU memory limit in GB")
 @click.option("--split-id", type=click.INT, default=0, help="split id")
 @click.option(
@@ -60,9 +60,6 @@ def main(config, gpu_id, memory_limit, split_id, output_path, log_path):
 
     print("Config:")
     pp.pprint(config)
-
-    if memory_limit < 0:
-        memory_limit = None
 
     config_gpu(gpu_id, memory_limit=memory_limit)
 
@@ -103,13 +100,33 @@ def main(config, gpu_id, memory_limit, split_id, output_path, log_path):
         callbacks.append(
             tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1))
 
-    model = get_compiled_model(config["model"], run_eagerly=run_eagerly)
-    model.fit(
-        x=ds_train,
-        validation_data=ds_val,
-        epochs=config["training"]["epochs"],
-        callbacks=callbacks,
-    )
+    param_model = config["model"]
+    model = get_compiled_model(param_model, run_eagerly=run_eagerly)
+    # model.fit(
+    #     x=ds_train,
+    #     validation_data=ds_val,
+    #     epochs=config["training"]["epochs"],
+    #     callbacks=callbacks,
+    # )
+    loss = lambda y_true, y_pred: tf.reduce_mean(
+        dice_loss(
+            y_true[..., 1],
+            y_pred[..., 1],
+        ) + dice_loss(
+            y_true[..., 2],
+            y_pred[..., 2],
+        ) + crossentropy(
+            y_true,
+            y_pred,
+        ))
+    optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
+    for epoch in range(config["training"]["epochs"]):
+
+        # Iterate over the batches of the dataset.
+        for step, (x_batch_train, y_batch_train) in enumerate(ds_train):
+            loss_value = train_step(x_batch_train, y_batch_train, model, loss,
+                                    optimizer)
+            print(f"Epoch {epoch} Step {step} Loss {loss_value}")
 
     ds_train = tf_data_creator.get_tf_data_with_id(ids_train).batch(
         config["training"]["batch_size"])
@@ -130,6 +147,18 @@ def main(config, gpu_id, memory_limit, split_id, output_path, log_path):
     if not DEBUG:
         save_stuff(config, model, model_name, split_id, output_path,
                    results_train, results_val, results_test)
+
+
+def train_step(x, y, model, loss_fn, optimizer):
+    with tf.GradientTape() as tape:
+        y_pred = model(x, training=True)
+        loss_value = loss_fn(y, y_pred)
+    y_pred_2 = model(x, training=False)
+    grads = tape.gradient(loss_value, model.trainable_weights)
+    grads = [tf.clip_by_norm(g, 1.0) for g in grads]
+    y_pred_3 = model(x, training=False)
+    optimizer.apply_gradients(zip(grads, model.trainable_weights))
+    return loss_value
 
 
 def get_model_name(config, split_id):

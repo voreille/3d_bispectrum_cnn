@@ -14,5 +14,9 @@ tqdm
 SimpleITK
 
 yapf
+tensorflow==2.4.2
 tensorflow-addons
 keras-tuner
+
+# local packages
+-e .

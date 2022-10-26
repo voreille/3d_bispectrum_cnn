@@ -94,3 +94,5 @@ target/
 /results_tuning/
 
 /venv/
+/.devcontainer/
+Dockerfile

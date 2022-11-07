@@ -493,13 +493,13 @@ class UnetLight(tf.keras.Model):
         self.down_stack = [
             self.get_residual_block(n_features[1]),
             self.get_residual_block(n_features[2]),
-            self.get_residual_block(n_features[3]),
-            self.get_residual_block(n_features[4]),
+            # self.get_residual_block(n_features[3]),
+            # self.get_residual_block(n_features[4]),
         ]
 
         self.up_stack = [
-            self.get_conv_block(n_features[4]),
-            self.get_conv_block(n_features[3]),
+            # self.get_conv_block(n_features[4]),
+            # self.get_conv_block(n_features[3]),
             self.get_conv_block(n_features[2]),
             self.get_conv_block(n_features[1]),
         ]
@@ -515,12 +515,12 @@ class UnetLight(tf.keras.Model):
         self.max_pool_stack = [
             tf.keras.layers.MaxPool3D(),
             tf.keras.layers.MaxPool3D(),
-            tf.keras.layers.MaxPool3D(),
-            tf.keras.layers.MaxPool3D(),
+            # tf.keras.layers.MaxPool3D(),
+            # tf.keras.layers.MaxPool3D(),
         ]
         self.upsampling_stack = [
-            self.get_upsampling_block(n_features[3]),
-            self.get_upsampling_block(n_features[2]),
+            # self.get_upsampling_block(n_features[3]),
+            # self.get_upsampling_block(n_features[2]),
             self.get_upsampling_block(n_features[1]),
             self.get_upsampling_block(n_features[0]),
         ]
@@ -559,24 +559,26 @@ class UnetLight(tf.keras.Model):
         return config
 
     def get_first_block(self, filters):
-        return tf.keras.Sequential([
-           ResidualLayer3D(filters,
-                            self.kernel_size,
-                            padding='SAME',
-                            activation="relu",
-                            use_batch_norm=self.use_batch_norm,
-                            conv_type=self.conv_type),
+        block = tf.keras.Sequential([
+            self.conv_constructor(filters,
+                                  self.kernel_size,
+                                  padding='SAME',
+                                  activation="relu"),
         ])
+        if self.use_batch_norm:
+            block.add(tf.keras.layers.BatchNormalization())
+        return block
 
     def get_residual_block(self, filters):
-        return tf.keras.Sequential([
-            ResidualLayer3D(filters,
-                            self.kernel_size,
-                            padding='SAME',
-                            activation="relu",
-                            use_batch_norm=self.use_batch_norm,
-                            conv_type=self.conv_type),
+        block = tf.keras.Sequential([
+            self.conv_constructor(filters,
+                                  self.kernel_size,
+                                  padding='SAME',
+                                  activation="relu"),
         ])
+        if self.use_batch_norm:
+            block.add(tf.keras.layers.BatchNormalization())
+        return block
 
     def get_conv_block(self, filters, n_conv=1):
         block = tf.keras.Sequential()

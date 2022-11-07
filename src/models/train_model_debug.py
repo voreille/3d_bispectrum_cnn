@@ -27,7 +27,7 @@ project_dir = Path(__file__).resolve().parents[2]
 config_path = project_dir / "configs/config.yaml"
 
 DEBUG = True
-run_eagerly = True
+run_eagerly = False
 pp = pprint.PrettyPrinter(depth=5)
 
 
@@ -39,7 +39,7 @@ pp = pprint.PrettyPrinter(depth=5)
 @click.option("--gpu-id", type=click.STRING, default="1", help="gpu id")
 @click.option("--memory-limit",
               type=click.FLOAT,
-              default=64,
+              default=32,
               help="GPU memory limit in GB")
 @click.option("--split-id", type=click.INT, default=0, help="split id")
 @click.option(
@@ -102,31 +102,31 @@ def main(config, gpu_id, memory_limit, split_id, output_path, log_path):
 
     param_model = config["model"]
     model = get_compiled_model(param_model, run_eagerly=run_eagerly)
-    # model.fit(
-    #     x=ds_train,
-    #     validation_data=ds_val,
-    #     epochs=config["training"]["epochs"],
-    #     callbacks=callbacks,
-    # )
-    loss = lambda y_true, y_pred: tf.reduce_mean(
-        dice_loss(
-            y_true[..., 1],
-            y_pred[..., 1],
-        ) + dice_loss(
-            y_true[..., 2],
-            y_pred[..., 2],
-        ) + crossentropy(
-            y_true,
-            y_pred,
-        ))
-    optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
-    for epoch in range(config["training"]["epochs"]):
+    model.fit(
+        x=ds_train,
+        validation_data=ds_val,
+        epochs=config["training"]["epochs"],
+        callbacks=callbacks,
+    )
+    # loss = lambda y_true, y_pred: tf.reduce_mean(
+    #     dice_loss(
+    #         y_true[..., 1],
+    #         y_pred[..., 1],
+    #     ) + dice_loss(
+    #         y_true[..., 2],
+    #         y_pred[..., 2],
+    #     ) + crossentropy(
+    #         y_true,
+    #         y_pred,
+    #     ))
+    # optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
+    # for epoch in range(config["training"]["epochs"]):
 
-        # Iterate over the batches of the dataset.
-        for step, (x_batch_train, y_batch_train) in enumerate(ds_train):
-            loss_value = train_step(x_batch_train, y_batch_train, model, loss,
-                                    optimizer)
-            print(f"Epoch {epoch} Step {step} Loss {loss_value}")
+    #     # Iterate over the batches of the dataset.
+    #     for step, (x_batch_train, y_batch_train) in enumerate(ds_train):
+    #         loss_value = train_step(x_batch_train, y_batch_train, model, loss,
+    #                                 optimizer)
+    #         print(f"Epoch {epoch} Step {step} Loss {loss_value}")
 
     ds_train = tf_data_creator.get_tf_data_with_id(ids_train).batch(
         config["training"]["batch_size"])
@@ -153,7 +153,7 @@ def train_step(x, y, model, loss_fn, optimizer):
     with tf.GradientTape() as tape:
         y_pred = model(x, training=True)
         loss_value = loss_fn(y, y_pred)
-    y_pred_2 = model(x, training=False)
+    y_pred_2 = model(x, training=True)
     grads = tape.gradient(loss_value, model.trainable_weights)
     grads = [tf.clip_by_norm(g, 1.0) for g in grads]
     y_pred_3 = model(x, training=False)

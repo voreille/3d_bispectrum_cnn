@@ -43,7 +43,7 @@ class BSHConv3D(tf.keras.layers.Layer):
         self.filters = filters
         self.max_degree = max_degree
         self._indices = (
-            (0, 0, 0),
+            # (0, 0, 0),
             (0, 1, 1),
             (0, 2, 2),
             (1, 1, 2),
@@ -67,7 +67,7 @@ class BSHConv3D(tf.keras.layers.Layer):
 
         if use_bias:
             self.bias = self.add_weight(
-                shape=(self.output_bispectrum_channels * self.filters, ),
+                shape=((self.output_bispectrum_channels + 1) * self.filters, ),
                 initializer=bias_initializer,
                 trainable=True,
                 name="bias_bchconv3d",
@@ -245,7 +245,9 @@ class BSHConv3D(tf.keras.layers.Layer):
         #                tf.cast(imag_x, tf.float32)))
         x = tf.complex(real_x, imag_x)
         x = self.get_bisp_feature_maps(x)
+        # x = self._get_spectrum_feature_maps(x)
         x = tf.math.sign(x) * tf.math.log(1 + tf.math.abs(x))
+        x = tf.concat([real_x[..., 0], x], -1)
         # x = tf.cast(x, inputs.dtype)
         if self.bias is not None:
             x = x + self.bias
@@ -443,7 +445,8 @@ class SHConv3D(tf.keras.layers.Layer):
                 self.n_radial_profiles,
                 self.max_degree + 1,
             ),
-            initializer=kernel_initializer,
+            initializer=tf.keras.initializers.RandomUniform(minval=-0.005,
+                                                            maxval=0.005),
             trainable=True,
             name="w_profile",
         )
@@ -517,7 +520,7 @@ class SHConv3D(tf.keras.layers.Layer):
             [2 * k + 1 for k in range(self.max_degree + 1)],
             axis=-1,
         )
-        # real_feature_maps = tf.reduce_sum(w * real_feature_maps, axis=(4, 6)),
+        # real_feature_maps = tf.reduce_sum(w * real_feature_maps, axis=(4, 6))
         real_feature_maps = tf.unstack(
             tf.reduce_sum(w * real_feature_maps, axis=(4, 6)),
             axis=-1,

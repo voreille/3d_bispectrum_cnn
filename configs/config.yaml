@@ -10,25 +10,25 @@ data:
     random_center: True
 
 model:
-  model_name: "Unet"
-  use_batch_norm: False
+  model_name: "BLRIUnet"
+  use_batch_norm: True
   mixed_precision: False
   output_channels: 3
   kernel_size: 3
   last_activation: "softmax"
   linear_upsampling: True
   # n_features: [12, 24, 48, 96, 192]
-  n_features: [8, 16, 32, 64, 128] # Best results from HP for standard CNN
+  # n_features: [8, 16, 32, 64, 128] # Best results from HP for standard CNN
   # n_features: [4, 8, 16, 32, 64]
   # n_features: [2, 4, 8, 16, 32]
-  # n_features: [1, 2, 4, 8, 16]
+  n_features: [1, 2, 4, 8, 16]
   # n_features: [1, 1, 1, 1, 1]
   compile:
     optimizer:
       class_name: "adam"
       config:
         learning_rate: 1.0e-3
-    # clipnorm: 1.0
+        clipnorm: 1.0
     # optimizer:
     #   class_name: "SGD"
     #   config:

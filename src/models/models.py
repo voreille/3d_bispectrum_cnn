@@ -143,6 +143,12 @@ class DebugNet(tf.keras.Model):
 
 
 class Unet(tf.keras.Model):
+    """
+    This class defines the U-net architecture to be employed in 
+    experiments involving spectral, bispectral, and standard convolutions.
+    Specify the desired 'conv_type' among the three possible 
+    values: "standard", "spectral", or "bispectral".
+    """
     CONV = {
         "standard": tf.keras.layers.Conv3D,
         "bispectral": BSHConv3D,
@@ -297,6 +303,11 @@ class Unet(tf.keras.Model):
 
 
 class GUnet(tf.keras.Model):
+    """
+    This class defines the U-net architecture to be employed
+    in experiments involving group convolution.
+    Specify the desired 'group' among the three possible values: "V", "T4", or "S4".
+    """
 
     def __init__(
         self,

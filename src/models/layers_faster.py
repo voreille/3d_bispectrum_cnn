@@ -42,14 +42,15 @@ class BSHConv3D(tf.keras.layers.Layer):
         super().__init__(**kwargs)
         self.filters = filters
         self.max_degree = max_degree
-        self._indices = (
-            # (0, 0, 0),
-            (0, 1, 1),
-            (0, 2, 2),
-            (1, 1, 2),
-            (1, 2, 1),
-            (1, 2, 3),
-        )
+        self._indices = None
+        # self._indices = (
+        #     # (0, 0, 0),
+        #     (0, 1, 1),
+        #     (0, 2, 2),
+        #     (1, 1, 2),
+        #     (1, 2, 1),
+        #     (1, 2, 3),
+        # )
         self.output_bispectrum_channels = self._output_bispectrum_channels()
 
         self._indices_inverse = None
@@ -67,7 +68,7 @@ class BSHConv3D(tf.keras.layers.Layer):
 
         if use_bias:
             self.bias = self.add_weight(
-                shape=((self.output_bispectrum_channels + 1) * self.filters, ),
+                shape=((self.output_bispectrum_channels) * self.filters, ),
                 initializer=bias_initializer,
                 trainable=True,
                 name="bias_bchconv3d",
@@ -86,7 +87,7 @@ class BSHConv3D(tf.keras.layers.Layer):
             self.proj_conv = None
 
     def _output_bispectrum_channels(self):
-        return len(self._indices)
+        return len(self.indices)
         # return self.max_degree + 1
         # n_outputs = 0
         # for n1 in range(0, math.floor(self.max_degree / 2) + 1):
@@ -247,7 +248,7 @@ class BSHConv3D(tf.keras.layers.Layer):
         x = self.get_bisp_feature_maps(x)
         # x = self._get_spectrum_feature_maps(x)
         x = tf.math.sign(x) * tf.math.log(1 + tf.math.abs(x))
-        x = tf.concat([real_x[..., 0], x], -1)
+        # x = tf.concat([real_x[..., 0], x], -1)
         # x = tf.cast(x, inputs.dtype)
         if self.bias is not None:
             x = x + self.bias
@@ -445,8 +446,9 @@ class SHConv3D(tf.keras.layers.Layer):
                 self.n_radial_profiles,
                 self.max_degree + 1,
             ),
-            initializer=tf.keras.initializers.RandomUniform(minval=-0.005,
-                                                            maxval=0.005),
+            # initializer=tf.keras.initializers.RandomUniform(minval=-0.005,
+            #                                                 maxval=0.005),
+            initializer=kernel_initializer,
             trainable=True,
             name="w_profile",
         )

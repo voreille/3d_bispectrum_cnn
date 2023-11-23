@@ -6,7 +6,7 @@ import numpy as np
 from src.models.layers_faster import SSHConv3D, SHConv3D, BSHConv3D
 from src.models.utils import config_gpu
 
-config_gpu(gpu_id="0", memory_limit=10)
+# config_gpu(gpu_id="0", memory_limit=10)
 # layer = SHConv3D.get("radial")(5, max_degree=5, padding="same")
 layer = BSHConv3D(2,
                   5,

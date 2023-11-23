@@ -6,7 +6,8 @@ to work with tf.keras
 import sys
 import tensorflow as tf
 
-from src.models.cubenet.groups import V_group, T4_group, S4_group_faster
+from src.models.cubenet.groups import (V_group, T4_group, S4_group_faster,
+                                       S4_group)
 from src.models.layers_faster import LinearUpsampling3D
 
 
@@ -43,6 +44,7 @@ class GroupConv(tf.keras.layers.Layer):
             "V": V_group,
             "T4": T4_group,
             "S4": S4_group_faster
+            # "S4": S4_group
         }[group]()
         self.group_dim = self.group.group_dim
         self.drop_sigma = drop_sigma
